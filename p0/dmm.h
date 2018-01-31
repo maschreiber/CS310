@@ -8,6 +8,22 @@
 //#define MAX_HEAP_SIZE	(1024*1024*4) /* max size restricted to 4MB, recommended setting for test_stress2 */
 #define MAX_HEAP_SIZE	(1024) /* max size restricted to 1kB*/
 
+
+/* struct: metadata_t
+ * ---------------
+ * A header that comes before each chunk of memory that
+ * contains the size of the memory and whether or not
+ * that memory is free.
+ */
+typedef struct metadata {
+  size_t size;
+  int available;
+  struct metadata *next;
+  struct metadata *prev;
+  char end[1]; 
+} metadata_t;
+
+
 /* On 32-bit machines, change this to 4 */
 #define WORD_SIZE	8
 
