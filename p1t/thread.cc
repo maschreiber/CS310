@@ -40,7 +40,7 @@ int thread_create(thread_startfunc_t func, void *arg){
 	//put func, args on stack
 	//goes in ready queue
 	interrupt_disable();
-	THREAD_COUNT ++;
+	
 	//initialize a context structure
 	ucontext_t* ucontext_ptr = new ucontext_t; //do trycatch here?
 	getcontext(ucontext_ptr); 
@@ -54,12 +54,13 @@ int thread_create(thread_startfunc_t func, void *arg){
 	makecontext(ucontext_ptr, (void (*)()) STUB, 2, func, arg);
 	//allocate update thread control block
 	TCB* newthread = new TCB;
-	newthread->tid = THREAD_COUNT;
+	newthread->tid = THREAD_COUNT+1;
 	newthread->stack = stack;
 	newthread->status = 0; // 0 for ready
 	newthread->ucontext = ucontext_ptr;
 	//push to ready queue
 	READY_QUEUE.push(newthread);
+	THREAD_COUNT ++;
 	interrupt_enable();
 	//remember to deallocate memory after this
 	return 0;
