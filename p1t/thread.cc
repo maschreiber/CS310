@@ -10,9 +10,10 @@
 using namespace std;
 
 queue<TCB*> READY_QUEUE;
-queue<TCB*> LOCK_QUEUE; 
 //map of queues for multiple locks/cvs
-queue<TCB*> CV_QUEUE;
+map<unsigned int, queue<TCB*>> LOCK_QUEUE_MAP;
+map<unsigned int, queue<TCB*>> CV_QUEUE_MAP;
+map<unsigned int, TCB*> LOCK_MAP; //maps the lock id to its owner
 
 int THREAD_COUNT = 0; //total number of thread
 
@@ -25,6 +26,7 @@ struct TCB{
 	int status; //state of the thread: 0 not finished 1 finished
 	ucontext_t* ucontext; // ucontext	
 }
+
 
 void STUB(thread_startfunc_t func, void* arg){
 	//Call (*func)(args), Call thread_exit()
@@ -104,17 +106,51 @@ int thread_create(thread_startfunc_t func, void *arg) {
 int thread_yield(void){
 	//caller goes to the tail of ready queue another thread from the front of readyq runs
 	interrupt_disable();
+	if (t_init == false){
+		interrupt_enable();
+		return -1;
+	}
 	TCB* next_thread = READY_QUEUE.front();
 	if (next_thread == NULL){
 		interrupt_enable();
 		return 0;
 	}
+	READY_QUEUE.push(current_thread);
 	swapcontext(current_thread->ucontext,next_thread->ucontext)
 	interrupt_enable();
 	return 0
 }
 
+
+int thread_lock(unsigned int lock){
+	//NEED MONITORS!
+	TCB* owner = LOCK_MAP[lock]; //if key lock is not existant in lock_map, NULL is set as its value
+	if (t_init == false || owner == current_thread){
+		interrupt_enable();
+		return -1;
+	}
+	//check if there is a queue for the lock in the lock queue map if not add one
+	if (LOCK_QUEUE_MAP.find(lock) == LOCK_QUEUE_MAP.end()){
+		// key not found in the map, initialize a queue for this lock
+		LOCK_MAP[lock] = NULL;
+		queue<TCB*> new_LOCK_QUEUE;
+		LOCK_QUEUE_MAP.insert({lock, new_LOCK_QUEUE});
+	} 
+	//while this monitor is not free put my TCB on this monitor lock list and switch
+	while (owner != NULL){
+		queue<TCB*> LOCK_QUEUE = LOCK_QUEUE_MAP[lock];
+		LOCK_QUEUE.push(current_thread);
+		TCB* next_thread = READY_QUEUE.front();
+		READY_QUEUE.pop();
+		swapcontext(current_thread->ucontext,next_thread->ucontext);
+	}
+	//if this monitor is free set current thread as owner of monitor
+	LOCK_MAP[lock] = current_thread;
+	return 0;
+}
  
+
+
 
  
 
