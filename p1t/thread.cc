@@ -12,12 +12,12 @@ using namespace std;
 queue<TCB*> READY_QUEUE;
 //map of queues for multiple locks/cvs
 map<unsigned int, queue<TCB*>> LOCK_QUEUE_MAP;
-map<unsigned int, queue<TCB*>> CV_QUEUE_MAP;
+map<pair<unsigned int, unsigned int>, queue<TCB*>> CV_QUEUE_MAP;
 map<unsigned int, TCB*> LOCK_OWNER_MAP; //maps the lock id to its owner
 
 int THREAD_COUNT = 0; //total number of thread
 
-TCB* RUNNING_THREAD;
+TCB* current_thread;
 
 // Structure which represents thread.
 struct TCB {
@@ -177,6 +177,7 @@ int thread_unlock(unsigned int lock){
 	//NEED MONITORS
 	//caller releases lock and continues running
 	//If the lock queue is not empty, then wake up a thread by moving it from the head of the lock queue to the tail of the ready queue
+	interrupt_disable();
 	if (t_init == false){
 		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
@@ -187,17 +188,64 @@ int thread_unlock(unsigned int lock){
 		READY_QUEUE.push(LOCK_QUEUE_MAP[lock].front());
 		LOCK_QUEUE_MAP[lock].pop();
 	}
+	interrupt_enable();
 	return 0;
 }
 
 
 
+int thread_wait(unsigned int lock, unsigned int cond){
+	//NEED MONITORS
+	if (t_init == false){
+		printf("Thread library must be initialized first. Call thread_libinit first.");
+		interrupt_enable();
+		return -1;
+	}
+	//caller unlocks the lock
+	thread_unlock(lock);
+	//if CV queue not intialized, initialize it
+	if (CV_QUEUE_MAP.find(make_pair(lock,cond)) == CV_QUEUE_MAP.end()){
+		queue<TCB*> NEW_CV_QUEUE;
+		CV_QUEUE_MAP[make_pair(lock,cond)] = NEW_CV_QUEUE;
+	}
+	//move current thread to tail of CV queue of this lock
+	CV_QUEUE_MAP[make_pair(lock,cond)].push(current_thread);
+	//thread from the front of ready queue runs
+	switch_thread();
+	thread_lock(lock);
+	return 0;
+}
 
 
+int thread_signal(unsigned int lock, unsigned int cond){
+	//if CV queue not empty, head of cv queue goes to the tail of ready queue
+	if (t_init == false){
+		printf("Thread library must be initialized first. Call thread_libinit first.");
+		interrupt_enable();
+		return -1;
+	}
+	//get waiter TCB from CV queue
+	if (!CV_QUEUE_MAP[make_pair(lock,cond)].empty()){
+		READY_QUEUE.push(CV_QUEUE_MAP[make_pair(lock,cond)].front());
+		CV_QUEUE_MAP[make_pair(lock,cond)].pop();
+	}
+	return 0;
+}
 
 
-
-
+int thread_broadcast(unsigned int lock, unsigned int cond){
+	if (t_init == false){
+		printf("Thread library must be initialized first. Call thread_libinit first.");
+		interrupt_enable();
+		return -1;
+	}
+	//get all the waiter in CV queue and put it in ready queue
+	while (!CV_QUEUE_MAP[make_pair(lock,cond)].empty()){
+		READY_QUEUE.push(CV_QUEUE_MAP[make_pair(lock,cond)].front());
+		CV_QUEUE_MAP[make_pair(lock,cond)].pop();
+	}
+	return 0;
+}
 
 
 
