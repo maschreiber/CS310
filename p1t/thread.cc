@@ -22,7 +22,7 @@ struct TCB{
 	// name/status (TCB) -> stack , ucontext_t
 	int tid; // thread identifier
 	char* stack; //stack pointer 
-	int status; //state of the thread: 0ready 1running 2waiting 3done? or just done or not
+	int status; //state of the thread: 0 not finished 1 finished
 	ucontext_t* ucontext; // ucontext	
 }
 
@@ -39,6 +39,7 @@ int thread_create(thread_startfunc_t func, void *arg){
 	//build stack frame for base of stack (stub)
 	//put func, args on stack
 	//goes in ready queue
+
 	interrupt_disable();
 	
 	//initialize a context structure
@@ -68,8 +69,18 @@ int thread_create(thread_startfunc_t func, void *arg){
 
 int thread_yield(void){
 	//caller goes to the tail of ready queue another thread from the front of readyq runs
+	interrupt_disable();
 	TCB* next_thread = READY_QUEUE.front();
+	if (next_thread == NULL){
+		interrupt_enable();
+		return 0;
+	}
+	swapcontext(current_thread->ucontext,next_thread->ucontext)
+	interrupt_enable();
+	return 0
 }
+
+ 
 
  
 
