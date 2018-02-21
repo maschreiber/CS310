@@ -34,7 +34,41 @@ void STUB(thread_startfunc_t func, void* arg){
 	thread_exit(); //question? what is thread_exit?
 }
 
-int thread_create(thread_startfunc_t func, void *arg){
+boolean t_init = false;
+
+/**
+ * Method thread_libinit initializes the thread library. A user program should call thread_libinit exactly
+ * once (before calling any other thread functions). Library must not be initialized more than once. 
+ * Creates and runs first thread, which calls the starting function it points to and this method will never
+ * return to its caller, and control with transfer completely to the starting function of the main application 
+ * thread.
+ */ 
+int thread_libinit(thread_startfunc_t func, void *arg) {
+	interrupt_disable();
+	
+	// If the library has already been initialized, do not reinitialize.
+	if (t_init) {
+		printf("Thread library already initialized. Do not attempt initialization again.");
+		interrupt_enable();
+		return -1;
+	} else {
+		t_init = true;
+	}
+	
+	// Re-enable interrupts before new thread creation.
+	interrupt_enable();
+
+	// Create new thread.
+	int main_status = thread_create(func, arg);
+
+	// If thread creation failed.
+	if (main_status < 0) {
+
+	}
+}
+
+int thread_create(thread_startfunc_t func, void *arg) {
+	//allocate thread control block
 	//allocate stack
 	//build stack frame for base of stack (stub)
 	//put func, args on stack
