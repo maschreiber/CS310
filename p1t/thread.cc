@@ -17,14 +17,13 @@ map<unsigned int, TCB*> LOCK_MAP; //maps the lock id to its owner
 
 int THREAD_COUNT = 0; //total number of thread
 
-TCB* current_thread;
+TCB* RUNNING_THREAD;
 
-struct TCB{
-	// name/status (TCB) -> stack , ucontext_t
-	int tid; // thread identifier
-	char* stack; //stack pointer 
-	int status; //state of the thread: 0 not finished 1 finished
-	ucontext_t* ucontext; // ucontext	
+// Structure which represents thread.
+struct TCB {
+	int tid; // Thread identifier number.
+	int status; //Thread state: 0 is ready, 1 is blocked for lock, 2 is waiting for CV, 3 is finished.
+	ucontext_t* ucontext; // Thread context.
 }
 
 
@@ -70,36 +69,54 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
 }
 
 int thread_create(thread_startfunc_t func, void *arg) {
-	//allocate thread control block
-	//allocate stack
-	//build stack frame for base of stack (stub)
-	//put func, args on stack
-	//goes in ready queue
-
 	interrupt_disable();
-	
-	//initialize a context structure
-	ucontext_t* ucontext_ptr = new ucontext_t; //do trycatch here?
-	getcontext(ucontext_ptr); 
-	//direct new thread to use a different stack
+
+	if (!init) {
+		printf("Thread library must be initialized first. Call thread_libinit first.")
+		interrupt_enable();
+		return -1;
+	}
+	/**
+	 * Follow steps on slide 39 of Recitation 2/5.
+	 * 1) Allocate thread control block.
+	 * 2) Allocate stack.
+	 * 3) Build stack frame for base of stack (stub)
+	 * 4) Put func, args on stack
+	 * 5) Put thread on ready queue.
+	 * 6) Run thread at some point.
+	 */ 
+
+	// Allocate thread control block.
+	TCB* thread = new TCB;
+
+	// Allocate stack.
 	char *stack = new char[STACK_SIZE];
-	char *stack = new char [STACK_SIZE];
-	ucontext_ptr->uc_stack.ss_sp = stack;
-	ucontext_ptr->uc_stack.ss_size = STACK_SIZE;
-	ucontext_ptr->uc_stack.ss_flags = 0;
-	ucontext_ptr->uc_link = NULL;
-	makecontext(ucontext_ptr, (void (*)()) STUB, 2, func, arg);
-	//allocate update thread control block
-	TCB* newthread = new TCB;
-	newthread->tid = THREAD_COUNT+1;
-	newthread->stack = stack;
-	newthread->status = 0; // 0 for ready
-	newthread->ucontext = ucontext_ptr;
-	//push to ready queue
-	READY_QUEUE.push(newthread);
-	THREAD_COUNT ++;
+	
+	// From the lab specification, for creating a ucontext.
+	ucontext_t *context = new ucontext_t;
+	getcontext(context);
+	context->uc_stack.ss_sp = stack;
+	context->uc_stack.ss_size = STACK_SIZE;
+	context->uc_stack.ss_flags = 0;
+	context->uc_link = NULL;
+
+	// Put func, args on stack by "doctoring" register values.
+	makecontext(context, (void (*)()) start, 2, func, arg);
+
+	// Set thread context.
+	thread->ucontext = context;
+
+	// Set thread status at ready.
+	thread->status = 0;
+
+	// Set thread identification number.
+	thread->tid = THREAD_COUNT;
+	THREAD_COUNT++;
+
+	// Put thread on ready queue.
+	READY_QUEUE.push(thread);
+
 	interrupt_enable();
-	//remember to deallocate memory after this
 	return 0;
 }
 
