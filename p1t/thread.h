@@ -11,12 +11,12 @@
 
 typedef void (*thread_startfunc_t) (void *);
 
-extern int thread_libinit(thread_startfunc_t func, void *arg);
-extern int thread_create(thread_startfunc_t func, void *arg);
-extern int thread_yield(void);
-extern int thread_lock(unsigned int lock);
-extern int thread_unlock(unsigned int lock);
-extern int thread_wait(unsigned int lock, unsigned int cond);
+extern int thread_libinit(thread_startfunc_t func, void *arg); //want to exit
+extern int thread_create(thread_startfunc_t func, void *arg); //want to exit
+extern int thread_yield(void); // call switch
+extern int thread_lock(unsigned int lock); //call switch
+extern int thread_unlock(unsigned int lock); 
+extern int thread_wait(unsigned int lock, unsigned int cond); //call switch
 extern int thread_signal(unsigned int lock, unsigned int cond);
 extern int thread_broadcast(unsigned int lock, unsigned int cond);
 

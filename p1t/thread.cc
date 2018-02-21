@@ -156,9 +156,13 @@ int thread_lock(unsigned int lock){
 	} 
 	//while this monitor is not free put my TCB on this monitor lock list and switch
 	while (owner != NULL){
-		queue<TCB*> LOCK_QUEUE = LOCK_QUEUE_MAP[lock];
-		LOCK_QUEUE.push(current_thread);
-		TCB* next_thread = READY_QUEUE.front();
+		LOCK_QUEUE_MAP[lock].push(current_thread);
+		if (READY_QUEUE.empty()){
+			printf("The ready queue is empty when trying to push the front of the ready queue to run after a block from lock");
+			//all threads are deadlocked need to exit the thread library
+			return -1;
+		}
+		TCB* next_thread = READY_QUEUE.front(); //put it to sleep if T attempts to acquire a lock that is busy
 		READY_QUEUE.pop();
 		swapcontext(current_thread->ucontext,next_thread->ucontext);
 	}
@@ -173,13 +177,13 @@ int thread_unlock(unsigned int lock){
 	//NEED MONITORS
 	//caller releases lock and continues running
 	//If the lock queue is not empty, then wake up a thread by moving it from the head of the lock queue to the tail of the ready queue
-	if (t_init == false || owner == current_thread){
+	if (t_init == false){
 		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
 	}
 	LOCK_OWNER_MAP[lock] = NULL; //releases owner
-	if (!LOCK_QUEUE.empty()){
+	if (!LOCK_QUEUE.empty()){ //take the front of the lock queue to the end of the ready queue
 		READY_QUEUE.push(LOCK_QUEUE_MAP[lock].front());
 		LOCK_QUEUE_MAP[lock].pop();
 	}
