@@ -13,7 +13,7 @@ queue<TCB*> READY_QUEUE;
 //map of queues for multiple locks/cvs
 map<unsigned int, queue<TCB*>> LOCK_QUEUE_MAP;
 map<unsigned int, queue<TCB*>> CV_QUEUE_MAP;
-map<unsigned int, TCB*> LOCK_MAP; //maps the lock id to its owner
+map<unsigned int, TCB*> LOCK_OWNER_MAP; //maps the lock id to its owner
 
 int THREAD_COUNT = 0; //total number of thread
 
@@ -72,7 +72,7 @@ int thread_create(thread_startfunc_t func, void *arg) {
 	interrupt_disable();
 
 	if (!init) {
-		printf("Thread library must be initialized first. Call thread_libinit first.")
+		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
 	}
@@ -124,6 +124,7 @@ int thread_yield(void){
 	//caller goes to the tail of ready queue another thread from the front of readyq runs
 	interrupt_disable();
 	if (t_init == false){
+		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
 	}
@@ -138,18 +139,18 @@ int thread_yield(void){
 	return 0
 }
 
-
 int thread_lock(unsigned int lock){
 	//NEED MONITORS!
-	TCB* owner = LOCK_MAP[lock]; //if key lock is not existant in lock_map, NULL is set as its value
+	TCB* owner = LOCK_OWNER_MAP[lock]; //if key lock is not existant in lock_owner_map, NULL is set as its value
 	if (t_init == false || owner == current_thread){
+		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
 	}
 	//check if there is a queue for the lock in the lock queue map if not add one
 	if (LOCK_QUEUE_MAP.find(lock) == LOCK_QUEUE_MAP.end()){
 		// key not found in the map, initialize a queue for this lock
-		LOCK_MAP[lock] = NULL;
+		LOCK_OWNER_MAP[lock] = NULL; //owner is NULL, initiated under the while loop
 		queue<TCB*> new_LOCK_QUEUE;
 		LOCK_QUEUE_MAP.insert({lock, new_LOCK_QUEUE});
 	} 
@@ -162,14 +163,31 @@ int thread_lock(unsigned int lock){
 		swapcontext(current_thread->ucontext,next_thread->ucontext);
 	}
 	//if this monitor is free set current thread as owner of monitor
-	LOCK_MAP[lock] = current_thread;
+	LOCK_OWNER_MAP[lock] = current_thread;
 	return 0;
 }
- 
 
 
 
- 
+int thread_unlock(unsigned int lock){
+	//NEED MONITORS
+	//caller releases lock and continues running
+	//If the lock queue is not empty, then wake up a thread by moving it from the head of the lock queue to the tail of the ready queue
+	if (t_init == false || owner == current_thread){
+		printf("Thread library must be initialized first. Call thread_libinit first.");
+		interrupt_enable();
+		return -1;
+	}
+	LOCK_OWNER_MAP[lock] = NULL; //releases owner
+	if (!LOCK_QUEUE.empty()){
+		READY_QUEUE.push(LOCK_QUEUE_MAP[lock].front());
+		LOCK_QUEUE_MAP[lock].pop();
+	}
+	return 0;
+}
+
+
+
 
 
 
