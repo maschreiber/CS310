@@ -10,10 +10,13 @@
 using namespace std;
 
 queue<TCB*> READY_QUEUE;
-queue<TCB*> LOCK_QUEUE;
+queue<TCB*> LOCK_QUEUE; 
+//map of queues for multiple locks/cvs
 queue<TCB*> CV_QUEUE;
 
 int THREAD_COUNT = 0; //total number of thread
+
+TCB* current_thread;
 
 struct TCB{
 	// name/status (TCB) -> stack , ucontext_t
@@ -56,17 +59,18 @@ int thread_create(thread_startfunc_t func, void *arg){
 	newthread->status = 0; // 0 for ready
 	newthread->ucontext = ucontext_ptr;
 	//push to ready queue
-	READY_QUEUE.push_back(newthread);
+	READY_QUEUE.push(newthread);
 	interrupt_enable();
 	//remember to deallocate memory after this
 	return 0;
 }
 
 int thread_yield(void){
-	
+	//caller goes to the tail of ready queue another thread from the front of readyq runs
+	TCB* next_thread = READY_QUEUE.front();
 }
 
-
+ 
 
 
 
