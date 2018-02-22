@@ -5,6 +5,7 @@
 #include "thread.h"
 #include "interrupt.h"
 #include <queue>
+#include <map>
 
 
 using namespace std;
@@ -19,7 +20,8 @@ int THREAD_COUNT = 0; //total number of thread
 
 TCB* RUNNING_THREAD;
 TCB* PREVIOUS_THREAD;
-TCB* NEXT_THREAD;
+
+TCB* DELETE_THREAD;
 
 // Structure which represents thread.
 struct TCB {
@@ -73,6 +75,7 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
 	// Create new thread.
 	int main_status = thread_create(func, arg);
 
+
 	// If thread creation failed.
 	if (main_status < 0) {
 
@@ -112,7 +115,7 @@ int thread_create(thread_startfunc_t func, void *arg) {
 	context->uc_link = NULL;
 
 	// Put func, args on stack by "doctoring" register values.
-	makecontext(context, (void (*)()) start, 2, func, arg);
+	makecontext(context, (void (*)()) STUB, 2, func, arg);
 
 	// Set thread context.
 	thread->ucontext = context;
@@ -139,13 +142,11 @@ int thread_yield(void){
 		interrupt_enable();
 		return -1;
 	}
-	TCB* next_thread = READY_QUEUE.front();
-	if (next_thread == NULL){
-		interrupt_enable();
-		return 0;
-	}
 	READY_QUEUE.push(RUNNING_THREAD);
-	swapcontext(RUNNING_THREAD->ucontext,next_thread->ucontext)
+	if (switch_thread() == -1) {
+		interrupt_enable();
+		return -1;
+	}
 	interrupt_enable();
 	return 0
 }
@@ -203,7 +204,7 @@ static int switch_thread() {
 	// If the ready queue is not empty, we should switch thread to the head of the ready queue.
 	if (!READY_QUEUE.empty()) {
 		pop_thread();
-		return swapcontext(PREVIOUS_THREAD->ucontext, NEXT_THREAD->ucontext);
+		return swapcontext(PREVIOUS_THREAD->ucontext, RUNNING_THREAD->ucontext);
 	}
 	// If the ready queue is empty, we have nothing to go to. 
 	if (RUNNING_THREAD != NULL) {
@@ -212,7 +213,8 @@ static int switch_thread() {
 	interrupt_enable();
 	cout << "Thread library exiting.\n";
 	exit(0);
-
+	
+	return 0;
 }
 
 /**
@@ -224,7 +226,7 @@ static int exit_thread() {
 	//If the ready queue is not empty, we should switch thread to the head of the ready queue.
 	if (!READY_QUEUE.empty()) {
 		pop_thread();
-		return swapcontext(OLD_THREAD->ucontext, CLEANUP_THREAD->ucontext);
+		return swapcontext(PREVIOUS_THREAD->ucontext, DELETE_THREAD->ucontext);
 	} else {
 		interrupt_enable();
 		cout << "Thread library exiting.\n";
@@ -235,27 +237,48 @@ static int exit_thread() {
 
 static void pop_thread() {
 	// The next thread to run is the head of the ready queue.
-	NEXT_THREAD = READY_QUEUE.front();
-	// Pop it off.
-	READY_QUEUE.pop();
-
+	//NEXT_THREAD = READY_QUEUE.front();
 	// Save the running thread as previous.
 	PREVIOUS_THREAD = RUNNING_THREAD;
 	// Set the new running thread to be the next thread.
-	RUNNING_THREAD = NEXT_THREAD;
+	RUNNING_THREAD = READY_QUEUE.front();
+	// Pop it off.
+	READY_QUEUE.pop();
 }
 
+static int delete_thread() {
+	while(1) {
+		if (PREVIOUS_THREAD != NULL) {
+  			PREVIOUS_THREAD->ucontext_ptr->uc_stack.ss_sp = NULL;
+  			PREVIOUS_THREAD->ucontext_ptr->uc_stack.ss_size = 0;
+  			PREVIOUS_THREAD->ucontext_ptr->uc_stack.ss_flags = 0;
+  			PREVIOUS_THREAD->ucontext_ptr->uc_link = NULL;
+  			delete (char*) PREVIOUS_THREAD->ucontext->uc_stack.ss_sp;
+  			delete PREVIOUS_THREAD->ucontext;
+  			delete PREVIOUS_THREAD;
+		}
+		int error = swapcontext(DELETE_THREAD->ucontext, RUNNING_THREAD->ucontext);
+		if (error == -1) {
+			return error;
+		}
+	}
+	return 0;
+}
 
 
 int thread_wait(unsigned int lock, unsigned int cond){
 	//NEED MONITORS
+	interrupt_disable();
 	if (t_init == false){
 		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
 	}
 	//caller unlocks the lock
-	thread_unlock(lock);
+	if (thread_unlock(lock) == -1) {
+		interrupt_enable();
+		return -1;
+	}
 	//if CV queue not intialized, initialize it
 	if (CV_QUEUE_MAP.find(make_pair(lock,cond)) == CV_QUEUE_MAP.end()){
 		queue<TCB*> NEW_CV_QUEUE;
@@ -264,41 +287,51 @@ int thread_wait(unsigned int lock, unsigned int cond){
 	//move current thread to tail of CV queue of this lock
 	CV_QUEUE_MAP[make_pair(lock,cond)].push(RUNNING_THREAD);
 	//thread from the front of ready queue runs
-	switch_thread();
-	thread_lock(lock);
+	if (switch_thread() == -1) {
+		interrupt_enable();
+		return -1;
+	}
+	if (thread_lock(lock) == -1) {
+		interrupt_enable();
+		return -1;
+	}
+	interrupt_enable();
 	return 0;
 }
 
 
 int thread_signal(unsigned int lock, unsigned int cond){
 	//if CV queue not empty, head of cv queue goes to the tail of ready queue
+	interrupt_disable();
 	if (t_init == false){
 		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
 	}
 	//get waiter TCB from CV queue
-	if (!CV_QUEUE_MAP[make_pair(lock,cond)].empty()){
-		READY_QUEUE.push(CV_QUEUE_MAP[make_pair(lock,cond)].front());
-		CV_QUEUE_MAP[make_pair(lock,cond)].pop();
+	pair<unsigned int, unsigned int> lock_cond_pair = make_pair(lock,cond);
+	if (!CV_QUEUE_MAP[lock_cond_pair].empty()){
+		READY_QUEUE.push(CV_QUEUE_MAP[lock_cond_pair].front());
+		CV_QUEUE_MAP[lock_cond_pair].pop();
 	}
+	interrupt_enable();
 	return 0;
 }
 
 
-int thread_broadcast(unsigned int lock, unsigned int cond){
-	if (t_init == false){
+int thread_broadcast(unsigned int lock, unsigned int cond) {
+	interrupt_disable();
+	if (t_init == false) {
 		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
-	}
+	}	
+	pair<unsigned int, unsigned int> lock_cond_pair = make_pair(lock,cond);
 	//get all the waiter in CV queue and put it in ready queue
-	while (!CV_QUEUE_MAP[make_pair(lock,cond)].empty()){
-		READY_QUEUE.push(CV_QUEUE_MAP[make_pair(lock,cond)].front());
-		CV_QUEUE_MAP[make_pair(lock,cond)].pop();
+	while (!CV_QUEUE_MAP[lock_cond_pair].empty()){
+		READY_QUEUE.push(CV_QUEUE_MAP[lock_cond_pair].front());
+		CV_QUEUE_MAP[lock_cond_pair].pop();
 	}
+	interrupt_enable();
 	return 0;
 }
-
-
-
