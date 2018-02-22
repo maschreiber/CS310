@@ -17,7 +17,9 @@ map<unsigned int, TCB*> LOCK_OWNER_MAP; //maps the lock id to its owner
 
 int THREAD_COUNT = 0; //total number of thread
 
-TCB* current_thread;
+TCB* RUNNING_THREAD;
+TCB* PREVIOUS_THREAD;
+TCB* NEXT_THREAD;
 
 // Structure which represents thread.
 struct TCB {
@@ -28,11 +30,20 @@ struct TCB {
 
 
 void STUB(thread_startfunc_t func, void* arg){
-	//Call (*func)(args), Call thread_exit()
+	// We enable interrupts because this is the method which runs after any swapcontext.
+	// This method is the core of the thread's execution, and thus interrupts must be allowed, like
+	// forced yielding.
 	interrupt_enable();
+
+	// Run the function.
 	func(arg);
+
+	// After execution, we disable interrupts to clean up and exit the thread and to ensure it happens.
 	interrupt_disable();
-	thread_exit(); //question? what is thread_exit?
+
+	// The thread is finished. We can exit it.
+	RUNNING_THREAD->status = 3;
+	exit_thread(); //question? what is thread_exit?
 }
 
 boolean t_init = false;
@@ -133,8 +144,8 @@ int thread_yield(void){
 		interrupt_enable();
 		return 0;
 	}
-	READY_QUEUE.push(current_thread);
-	swapcontext(current_thread->ucontext,next_thread->ucontext)
+	READY_QUEUE.push(RUNNING_THREAD);
+	swapcontext(RUNNING_THREAD->ucontext,next_thread->ucontext)
 	interrupt_enable();
 	return 0
 }
@@ -144,7 +155,7 @@ int thread_lock(unsigned int lock){
 	// the lock.
 	interrupt_disable();
 	TCB* owner = LOCK_OWNER_MAP[lock]; //if key lock is not existant in lock_owner_map, NULL is set as its value
-	if (t_init == false || owner == current_thread){
+	if (t_init == false || owner == RUNNING_THREAD) {
 		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
@@ -158,10 +169,10 @@ int thread_lock(unsigned int lock){
 	} 
 	//while this monitor is not free put my TCB on this monitor lock list and switch
 	while (owner != NULL){
-		LOCK_QUEUE_MAP[lock].push(current_thread);
+		LOCK_QUEUE_MAP[lock].push(RUNNING_THREAD);
 	}
 	//if this monitor is free set current thread as owner of monitor
-	LOCK_OWNER_MAP[lock] = current_thread;
+	LOCK_OWNER_MAP[lock] = RUNNING_THREAD;
 	return 0;
 }
 
@@ -173,7 +184,7 @@ int thread_unlock(unsigned int lock){
 	//If the lock queue is not empty, then wake up a thread by moving it from the head of the lock queue to the tail of the ready queue
 	interrupt_disable();
 
-	if (t_init == false || owner == current_thread){
+	if (t_init == false || owner == RUNNING_THREAD){
 		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
@@ -191,33 +202,47 @@ static int switch_thread() {
 	interrupt_disable();
 	// If the ready queue is not empty, we should switch thread to the head of the ready queue.
 	if (!READY_QUEUE.empty()) {
-		// The next thread to run is the head of the ready queue.
-		TCB *next = READY_QUEUE.front();
-		// Pop it off.
-		READY_QUEUE.pop();
-
-		// Save the running thread as previous. It is marked for 
-		TCB *previous = RUNNING_THREAD;
-		// Set the new running thread to be the next thread.
-		RUNNING_THREAD = next;
-
-		// Now simply swap the contexts. We will not return if successful (or eventually 0, as per
-		// swapcontext Linux documentation), or -1 if an error is reported. No need to call interrupt_enable;
-		// the switched thread will handle that.
-		return swapcontext(previous->ucontext, next->ucontext);
+		pop_thread();
+		return swapcontext(PREVIOUS_THREAD->ucontext, NEXT_THREAD->ucontext);
 	}
 	// If the ready queue is empty, we have nothing to go to. 
 	if (RUNNING_THREAD != NULL) {
 		// Delete this thread.
 	}
-	interrupt_disable();
+	interrupt_enable();
 	cout << "Thread library exiting.\n";
 	exit(0);
 
 }
 
+/**
+ * Exits a thread, called at the end of thread_libinit if we ever get there, and most definitely
+ * after STUB (the function) finishes running, we must mark the thread finished and switch threads.
+ */ 
 static int exit_thread() {
+	interrupt_disable();
+	//If the ready queue is not empty, we should switch thread to the head of the ready queue.
+	if (!READY_QUEUE.empty()) {
+		pop_thread();
+		return swapcontext(OLD_THREAD->ucontext, CLEANUP_THREAD->ucontext);
+	} else {
+		interrupt_enable();
+		cout << "Thread library exiting.\n";
+		exit(0);
+	}
+	return 0;
+}
 
+static void pop_thread() {
+	// The next thread to run is the head of the ready queue.
+	NEXT_THREAD = READY_QUEUE.front();
+	// Pop it off.
+	READY_QUEUE.pop();
+
+	// Save the running thread as previous.
+	PREVIOUS_THREAD = RUNNING_THREAD;
+	// Set the new running thread to be the next thread.
+	RUNNING_THREAD = NEXT_THREAD;
 }
 
 
@@ -237,7 +262,7 @@ int thread_wait(unsigned int lock, unsigned int cond){
 		CV_QUEUE_MAP[make_pair(lock,cond)] = NEW_CV_QUEUE;
 	}
 	//move current thread to tail of CV queue of this lock
-	CV_QUEUE_MAP[make_pair(lock,cond)].push(current_thread);
+	CV_QUEUE_MAP[make_pair(lock,cond)].push(RUNNING_THREAD);
 	//thread from the front of ready queue runs
 	switch_thread();
 	thread_lock(lock);
