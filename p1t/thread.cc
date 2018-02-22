@@ -140,7 +140,9 @@ int thread_yield(void){
 }
 
 int thread_lock(unsigned int lock){
-	//NEED MONITORS!
+	// Thread lock must not be interrupted because then perhaps two threads might end up holding
+	// the lock.
+	interrupt_disable();
 	TCB* owner = LOCK_OWNER_MAP[lock]; //if key lock is not existant in lock_owner_map, NULL is set as its value
 	if (t_init == false || owner == current_thread){
 		printf("Thread library must be initialized first. Call thread_libinit first.");
@@ -157,14 +159,6 @@ int thread_lock(unsigned int lock){
 	//while this monitor is not free put my TCB on this monitor lock list and switch
 	while (owner != NULL){
 		LOCK_QUEUE_MAP[lock].push(current_thread);
-		if (READY_QUEUE.empty()){
-			printf("The ready queue is empty when trying to push the front of the ready queue to run after a block from lock");
-			//all threads are deadlocked need to exit the thread library
-			return -1;
-		}
-		TCB* next_thread = READY_QUEUE.front(); //put it to sleep if T attempts to acquire a lock that is busy
-		READY_QUEUE.pop();
-		swapcontext(current_thread->ucontext,next_thread->ucontext);
 	}
 	//if this monitor is free set current thread as owner of monitor
 	LOCK_OWNER_MAP[lock] = current_thread;
@@ -178,18 +172,52 @@ int thread_unlock(unsigned int lock){
 	//caller releases lock and continues running
 	//If the lock queue is not empty, then wake up a thread by moving it from the head of the lock queue to the tail of the ready queue
 	interrupt_disable();
-	if (t_init == false){
+
+	if (t_init == false || owner == current_thread){
 		printf("Thread library must be initialized first. Call thread_libinit first.");
 		interrupt_enable();
 		return -1;
 	}
 	LOCK_OWNER_MAP[lock] = NULL; //releases owner
-	if (!LOCK_QUEUE.empty()){ //take the front of the lock queue to the end of the ready queue
+	if (!LOCK_QUEUE.empty()){
 		READY_QUEUE.push(LOCK_QUEUE_MAP[lock].front());
 		LOCK_QUEUE_MAP[lock].pop();
 	}
 	interrupt_enable();
 	return 0;
+}
+
+static int switch_thread() {
+	interrupt_disable();
+	// If the ready queue is not empty, we should switch thread to the head of the ready queue.
+	if (!READY_QUEUE.empty()) {
+		// The next thread to run is the head of the ready queue.
+		TCB *next = READY_QUEUE.front();
+		// Pop it off.
+		READY_QUEUE.pop();
+
+		// Save the running thread as previous. It is marked for 
+		TCB *previous = RUNNING_THREAD;
+		// Set the new running thread to be the next thread.
+		RUNNING_THREAD = next;
+
+		// Now simply swap the contexts. We will not return if successful (or eventually 0, as per
+		// swapcontext Linux documentation), or -1 if an error is reported. No need to call interrupt_enable;
+		// the switched thread will handle that.
+		return swapcontext(previous->ucontext, next->ucontext);
+	}
+	// If the ready queue is empty, we have nothing to go to. 
+	if (RUNNING_THREAD != NULL) {
+		// Delete this thread.
+	}
+	interrupt_disable();
+	cout << "Thread library exiting.\n";
+	exit(0);
+
+}
+
+static int exit_thread() {
+
 }
 
 
