@@ -87,9 +87,11 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
   islib = true;
 
   try {
+    //initiazte delete thread struct variables
     DELETE_THREAD = new TCB;
     DELETE_THREAD->status = 0;
 
+    //set ucontext
     DELETE_THREAD->ucontext = new ucontext_t;
     getcontext(DELETE_THREAD->ucontext);
     DELETE_THREAD->ucontext->uc_stack.ss_sp = new char [STACK_SIZE];
@@ -111,10 +113,11 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
   RUNNING_THREAD = READY_QUEUE.front();
   READY_QUEUE.pop();
 
-  //switch to RUNNING_THREAD thread
+  //switch to RUNNING_THREAD thread to start func
   interrupt_disable2();
   switchtorunningthread();
 
+  //return to clean up
   check_ready_queue();
 
   // no runnable threads in the system, or all threads are deadlocked
@@ -148,13 +151,16 @@ int thread_create(thread_startfunc_t func, void *arg) {
     * 4) Put func, args on stack
     * 5) Put thread on ready queue.
     * 6) Run thread at some point.
+    * remember to try catch every time we create new ucontext_t
     */
 
   TCB* newThread;
   try {
+    //intitate struct variables
     newThread = new TCB;
     newThread->status = 0;
 
+    //set context for newthread's ucontext
     newThread->ucontext = new ucontext_t;
     getcontext(newThread->ucontext);
     newThread->ucontext->uc_stack.ss_sp = new char [STACK_SIZE];
