@@ -92,7 +92,7 @@ void pingpong2(void* arg){
   
 }
 
-void parent(){
+void parent(void* arg){
   cout << "thread enters parent\n";
   if (thread_create((thread_startfunc_t) pingpong1, (void*) 100) < 0){
     cout << "\nthread 1 failed\n";
