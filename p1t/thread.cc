@@ -231,7 +231,7 @@ int thread_lock(unsigned int lock){
     LOCK_QUEUE_MAP.insert(pair<unsigned int, queue<TCB*> >(lock, NEW_LOCK_QUEUE) ); // Insert.
   }
   // while lock not free
-  while (LOCK_OWNER_MAP[lock] != NULL) { //CHANGED IF TO WHILE
+  if (LOCK_OWNER_MAP[lock] != NULL) { //CHANGED IF TO WHILE
     LOCK_QUEUE_MAP[lock].push(RUNNING_THREAD); // Push current thread to end of ready queue.
     switchtodeletethread(); // Switch thread to run the head of the ready queue.
   } else { //Lock is free, running is owner now
