@@ -22,26 +22,22 @@ void pingpong1(void* arg){
   //thread 1 get this lock, ping and relinguish the lock and waits, in CV queue now
   while(true){
     cout << "ping\n";
+
+    if (thread_signal(lock1, cond1) < 0){ //signal and thread2 is on ready
+      cout << "thread1 signal failed\n";
+      exit(0);
+    } else{
+      cout << "thread1 signal succeeded\n";
+    }
+
+    
     if (thread_wait(lock1, cond1) < 0){
       cout << "thread1 wait failed\n";
       exit(0);
     }else{
       cout << "thread1 waits\n";
     }
-
-    if (thread_signal(lock1, cond1) < 0){ //signal and thread1 is on ready
-      cout << "thread1 signal failed\n";
-      exit(0);
-    } else{
-      cout << "thread1 signal succeeded\n";
-    }
-    if (thread_yield() < 0){//signal and thread 1 is running
-      cout << "thread1 yield failed\n";
-      exit(0);
-    }else{
-      cout << "thread1 yield succeeded\n";
-    }
-    //returns after thread 1 yields
+    //returns after thread 2 waits
   }
 
   if (thread_unlock(lock1) < 0) {
@@ -66,12 +62,6 @@ void pingpong2(void* arg){
   //thread pongs and put herself on wait(), thread 2 in CV queue now
   while (true){
     cout << "pong\n";
-    if (thread_wait(lock1, cond1) < 0){
-      cout << "thread2 wait failed\n";
-      exit(0);
-    }else{
-      cout << "thread2 waits\n";
-    }
 
     if (thread_signal(lock1, cond1) < 0){ //signal and thread1 is on ready
       cout << "thread2 signal failed\n";
@@ -79,13 +69,15 @@ void pingpong2(void* arg){
     } else{
       cout << "thread2 signal succeeded\n";
     }
-    if (thread_yield() < 0){//signal and thread 1 is running
-      cout << "thread2 yield failed\n";
+
+    if (thread_wait(lock1, cond1) < 0){
+      cout << "thread2 wait failed\n";
       exit(0);
     }else{
-      cout << "thread2 yield succeeded\n";
+      cout << "thread2 waits\n";
     }
-    //returns after thread 1 yields
+    
+    //returns after thread 1 waits
   }
 
   if (thread_unlock(lock1) < 0) {
@@ -100,16 +92,16 @@ void pingpong2(void* arg){
 void parent(){
   cout << "thread enters parent\n";
   if (thread_create((thread_startfunc_t) pingpong1, (void*) 100) < 0){
-    cout << "\nthread 1 failed";
+    cout << "\nthread 1 failed\n";
     exit(0);
   }else{
-    cout << "\nthread 1 created";
+    cout << "\nthread 1 created\n";
   }
   if (thread_create((thread_startfunc_t) pingpong2, (void*) 100) < 0){
-    cout << "\nthread 2 failed";
+    cout << "\nthread 2 failed\n";
     exit(0);
   }else{
-    cout << "\nthread 2 created";
+    cout << "\nthread 2 created\n";
   }
   
 
