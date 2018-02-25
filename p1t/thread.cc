@@ -83,15 +83,11 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
     //printf("Thread library must be islibialized first. Call thread_libislib first.");
     return -1;
   }
-
+  
   islib = true;
 
   try {
-    //initiazte delete thread struct variables
     DELETE_THREAD = new TCB;
-    DELETE_THREAD->status = 0;
-
-    //set ucontext
     DELETE_THREAD->ucontext = new ucontext_t;
     getcontext(DELETE_THREAD->ucontext);
     DELETE_THREAD->ucontext->uc_stack.ss_sp = new char [STACK_SIZE];
@@ -105,6 +101,8 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
     delete DELETE_THREAD;
     return -1;
   }
+  
+  DELETE_THREAD->status = 0;
 
   if (thread_create(func, arg) == -1){
     return -1;
@@ -113,14 +111,14 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
   RUNNING_THREAD = READY_QUEUE.front();
   READY_QUEUE.pop();
 
-  //switch to RUNNING_THREAD thread to start func
+  //switch to RUNNING_THREAD thread
   interrupt_disable2();
   switchtorunningthread();
 
-  //return to clean up
   check_ready_queue();
 
-  // no runnable threads in the system, or all threads are deadlocked
+  //When there are no runnable threads in the system (e.g. all threads have
+  //status, or all threads are deadlocked)
   cout << "Thread library exiting.\n";
   exit(0);
 }
@@ -139,37 +137,25 @@ int thread_create(thread_startfunc_t func, void *arg) {
   interrupt_disable2();
 
   if (!islib) {
-    //printf("Thread library must be islibialized first. Call thread_libislib first.");
+    //printf("Thread pingzlibrary must be islibialized first. Call thread_libislib first.");
     interrupt_enable2();
     return -1;
   }
-    /**
-    * Follow steps on slide 39 of Recitation 2/5.
-    * 1) Allocate thread control block.
-    * 2) Allocate stack.
-    * 3) Build stack frame for base of stack (stub)
-    * 4) Put func, args on stack
-    * 5) Put thread on ready queue.
-    * 6) Run thread at some point.
-    * remember to try catch every time we create new ucontext_t
-    */
 
   TCB* newThread;
+  
   try {
-    //intitate struct variables
     newThread = new TCB;
-    newThread->status = 0;
-
-    //set context for newthread's ucontext
+    
     newThread->ucontext = new ucontext_t;
     getcontext(newThread->ucontext);
     newThread->ucontext->uc_stack.ss_sp = new char [STACK_SIZE];
     newThread->ucontext->uc_stack.ss_size = STACK_SIZE;
     newThread->ucontext->uc_stack.ss_flags = 0;
     newThread->ucontext->uc_link = NULL;
+    
     makecontext(newThread->ucontext, (void (*)())STUB, 2, func, arg);
-
-    READY_QUEUE.push(newThread);
+    
   }
   catch (bad_alloc b) {
     delete (char*) newThread->ucontext->uc_stack.ss_sp;
@@ -178,6 +164,9 @@ int thread_create(thread_startfunc_t func, void *arg) {
     interrupt_enable2();
     return -1;
   }
+  newThread->status = 0;
+  READY_QUEUE.push(newThread);
+  
   interrupt_enable2();
   return 0;
 }
@@ -204,18 +193,41 @@ int thread_lock(unsigned int lock){
     interrupt_enable2();
     return -1;
   }
+
+  // Check if lock exists in the lock map, if not initiate it
+  if (LOCK_QUEUE_MAP.count(lock) == 0) {
+    LOCK_OWNER_MAP[lock] = NULL; // Lock has no owner yet.
+    queue<TCB*> NEW_LOCK_QUEUE; // Create empty queue.
+    LOCK_QUEUE_MAP.insert(pair<unsigned int, queue<TCB*> >(lock, NEW_LOCK_QUEUE) ); // Insert.
+  }
+
+  while (LOCK_OWNER_MAP[lock] != NULL){ //while someone is holding the lock
+    //if that someone is myself, this is an error, exit func
+    if (LOCK_OWNER_MAP[lock] == RUNNING_THREAD) {
+      interrupt_enable2();
+      return -1;
+    } else{
+
+    //if that owner is someone else, go into wait
+    LOCK_QUEUE_MAP[lock].push(RUNNING_THREAD); // Push current thread to end of ready queue.
+    switchtodeletethread(); // Switch thread to run the head of the ready queue.
+    }
+  }
+
+  // no one should hold the lock in this case
+  LOCK_OWNER_MAP[lock] = RUNNING_THREAD; // Give lock to this thread.
+
+
+
+/*
+
+  
   // Calling for the lock while holding it is an error.
   if (LOCK_OWNER_MAP[lock] == RUNNING_THREAD) {
     interrupt_enable2();
     return -1;
   }
 
-  // Check if there is a queue for the lock in the lock queue map, and if not -- add one.
-  if (LOCK_QUEUE_MAP.count(lock) == 0) {
-    LOCK_OWNER_MAP[lock] = NULL; // Lock has no owner yet.
-    queue<TCB*> NEW_LOCK_QUEUE; // Create empty queue.
-    LOCK_QUEUE_MAP.insert(pair<unsigned int, queue<TCB*> >(lock, NEW_LOCK_QUEUE) ); // Insert.
-  }
   // If the lock is owned by another thread.
   if (LOCK_OWNER_MAP[lock] != NULL) {
     LOCK_QUEUE_MAP[lock].push(RUNNING_THREAD); // Push current thread to end of ready queue.
@@ -225,6 +237,11 @@ int thread_lock(unsigned int lock){
   }
 
   // We can re-enable interrupts for forced yields.
+
+*/
+
+
+
   interrupt_enable2();
   return 0;
 }
@@ -299,7 +316,7 @@ int thread_signal(unsigned int lock, unsigned int cond){
   if (!CV_QUEUE_MAP[lock_cond_pair].empty()){
     READY_QUEUE.push(CV_QUEUE_MAP[lock_cond_pair].front());
     CV_QUEUE_MAP[lock_cond_pair].pop();
-  };
+  }
   interrupt_enable2(); // BADENABLE
   return 0;
 }
