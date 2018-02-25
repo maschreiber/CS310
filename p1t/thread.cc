@@ -76,6 +76,9 @@ static void check_ready_queue(){
     READY_QUEUE.pop();
     switchtorunningthread();
   }
+  if (RUNNING_THREAD != NULL){
+    cleanup();
+  }
 }
 
 int thread_libinit(thread_startfunc_t func, void *arg) {
@@ -88,7 +91,7 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
 
   try {
     //initiazte delete thread struct variables
-    DELETE_THREAD = new TCB;
+    DELETE_THREAD = new TCB; //creating a new ucontext when initiating TCB so have to try catch it
     DELETE_THREAD->status = 0;
 
     //set ucontext
@@ -99,7 +102,7 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
     DELETE_THREAD->ucontext->uc_stack.ss_flags = 0;
     DELETE_THREAD->ucontext->uc_link = NULL;
   }
-  catch (bad_alloc b) {
+  catch (bad_alloc ext) {
     delete (char*) DELETE_THREAD->ucontext->uc_stack.ss_sp;
     delete DELETE_THREAD->ucontext;
     delete DELETE_THREAD;
@@ -118,6 +121,7 @@ int thread_libinit(thread_startfunc_t func, void *arg) {
   switchtorunningthread();
 
   //return to clean up
+  //this is basically a switch() func in p1.pdf ran on DELETE_THREAD
   check_ready_queue();
 
   // no runnable threads in the system, or all threads are deadlocked
@@ -157,27 +161,32 @@ int thread_create(thread_startfunc_t func, void *arg) {
   TCB* newThread;
   try {
     //intitate struct variables
-    newThread = new TCB;
-    newThread->status = 0;
-
-    //set context for newthread's ucontext
+    newThread = new TCB; //creating a new ucontext when initiating TCB so have to try catch it
+    //get context for newthread's ucontext
     newThread->ucontext = new ucontext_t;
     getcontext(newThread->ucontext);
+    //get the stack and let uc stack ss_sp point to it
     newThread->ucontext->uc_stack.ss_sp = new char [STACK_SIZE];
+    //this part is just primitives
     newThread->ucontext->uc_stack.ss_size = STACK_SIZE;
     newThread->ucontext->uc_stack.ss_flags = 0;
     newThread->ucontext->uc_link = NULL;
+
     makecontext(newThread->ucontext, (void (*)())STUB, 2, func, arg);
 
-    READY_QUEUE.push(newThread);
   }
-  catch (bad_alloc b) {
+  catch (bad_alloc ext) {
     delete (char*) newThread->ucontext->uc_stack.ss_sp;
     delete newThread->ucontext;
     delete newThread;
+    //should enable interrupt back when it fails and exit
     interrupt_enable2();
     return -1;
   }
+  //finished creating TCB, push on ready queue
+  READY_QUEUE.push(newThread);
+  newThread->status = 0;
+
   interrupt_enable2();
   return 0;
 }
@@ -198,6 +207,11 @@ int thread_yield(void) {
 
 int thread_lock(unsigned int lock){
   // Thread lock must not be interrupted because two threads might end up holding lock.
+  // 1) lock is not existant -> init it in lock map + lock owner, running gets it
+  // 2) lock is free -> owner = running
+  // 3) lock is not free -> running put onto lock queue, switch
+  //*owner of lock should not lock it again
+
   interrupt_disable2();
   if (!islib) {
     //printf("Thread library must be islibialized first. Call thread_libislib first.");
@@ -209,19 +223,19 @@ int thread_lock(unsigned int lock){
     interrupt_enable2();
     return -1;
   }
-
+  //lock is not existant
   // Check if there is a queue for the lock in the lock queue map, and if not -- add one.
   if (LOCK_QUEUE_MAP.count(lock) == 0) {
     LOCK_OWNER_MAP[lock] = NULL; // Lock has no owner yet.
     queue<TCB*> NEW_LOCK_QUEUE; // Create empty queue.
     LOCK_QUEUE_MAP.insert(pair<unsigned int, queue<TCB*> >(lock, NEW_LOCK_QUEUE) ); // Insert.
   }
-  // If the lock is owned by another thread.
-  if (LOCK_OWNER_MAP[lock] != NULL) {
+  // while lock not free
+  while (LOCK_OWNER_MAP[lock] != NULL) { //CHANGED IF TO WHILE
     LOCK_QUEUE_MAP[lock].push(RUNNING_THREAD); // Push current thread to end of ready queue.
     switchtodeletethread(); // Switch thread to run the head of the ready queue.
-  } else {
-    LOCK_OWNER_MAP[lock] = RUNNING_THREAD; // Give lock to this thread.
+  } else { //Lock is free, running is owner now
+    LOCK_OWNER_MAP[lock] = RUNNING_THREAD;
   }
 
   // We can re-enable interrupts for forced yields.
@@ -275,7 +289,7 @@ int thread_wait(unsigned int lock, unsigned int cond) {
   // If CV waiting queue is not islibialized, we islibialize it.
   pair<unsigned int, unsigned int> lock_cond_pair = make_pair(lock,cond);
   if (CV_QUEUE_MAP.find(lock_cond_pair) == CV_QUEUE_MAP.end()){
-    queue<TCB*> NEW_CV_QUEUE;
+    queue<TCB*> NEW_CV_QUEUE; //try catch
     CV_QUEUE_MAP[lock_cond_pair] = NEW_CV_QUEUE;
   }
   // Push thread to tail of CV waiting queue.
