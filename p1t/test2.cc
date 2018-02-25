@@ -8,7 +8,8 @@ using namespace std;
 
 int lock1 = 1;
 int cond1 = 1;
-int lock2 = 2;
+
+int c = 10;
 
 void pingpong1(void* arg){
   //ping pong  while something is not done, mx acquire, print, mx release
@@ -20,7 +21,7 @@ void pingpong1(void* arg){
   }
 
   //thread 1 get this lock, ping and relinguish the lock and waits, in CV queue now
-  while(true){
+  while(c > 0){
     cout << "ping\n";
 
     if (thread_signal(lock1, cond1) < 0){ //signal and thread2 is on ready
@@ -38,6 +39,7 @@ void pingpong1(void* arg){
       cout << "thread1 waits\n";
     }
     //returns after thread 2 waits
+    c--;
   }
 
   if (thread_unlock(lock1) < 0) {
@@ -60,7 +62,7 @@ void pingpong2(void* arg){
   }
 
   //thread pongs and put herself on wait(), thread 2 in CV queue now
-  while (true){
+  while (c > 0){
     cout << "pong\n";
 
     if (thread_signal(lock1, cond1) < 0){ //signal and thread1 is on ready
@@ -78,6 +80,7 @@ void pingpong2(void* arg){
     }
     
     //returns after thread 1 waits
+    c--;
   }
 
   if (thread_unlock(lock1) < 0) {
