@@ -3,7 +3,7 @@
 #include "thread.h"
 #include <assert.h>
 using namespace std;
-//tests if broadcast does not sent every thread to ready queue
+//complicated version of test7.cc dont know if should work or not. tests if broadcast does not sent every thread to ready queue
 
 //put all ready thread in the cv queue
 //broadcast: put everything on the cv wait queue to the tail of the ready queue
@@ -58,31 +58,39 @@ void broadcast(void* arg){
 void block(void* arg){
 	cout << "thread enters block.\n";
 	if (thread_lock(lock1) < 0) { 
-    	cout << "thread lock1 failed.\n";
+    	cout << "block lock1 failed.\n";
   	}else{
-  		cout << "thread lock1 successful.\n";
+  		cout << "block lock1 successful.\n";
   	}
-  	cout << "thread tries to wait.\n";
+  	cout << "block tries to wait.\n";
 
   	if (thread_wait(lock1, cond1) < 0){ 
-  		cout << "thread wait failed.\n";
+  		cout << "block wait failed.\n";
   	}else{
-  		cout << "thread wait suceeded.\n";
+  		cout << "block wait suceeded.\n";
   	}
-  	cout << "thread comes back from wait in block.\n";
+  	cout << "block comes back from wait in block.\n";
 
   	if (thread_unlock(lock1) < 0) { 
-    	cout << "thread unlock1 failed.\n";
+    	cout << "block unlock1 failed.\n";
   	}else{
-  		cout << "thread unlock1 successful.\n";
+  		cout << "block unlock1 successful.\n";
   	}
-  	cout << "block almost end tries to go back to broadcast.\n";
+  	cout << "block tries to broadcast.\n";
   	if (thread_broadcast(lock1, cond1) < 0){
-		cout << "thread broadcast failed.\n";
+		cout << "block broadcast failed.\n";
 	} else{
-		cout << "thread broadcast suceeded.\n";
+		cout << "block broadcast suceeded.\n";
 	}
+	cout << "block tries to wait.\n";
+
+  	if (thread_wait(lock1, cond1) < 0){ 
+  		cout << "block wait failed.\n";
+  	}else{
+  		cout << "block wait suceeded.\n";
+  	}
   	cout << "func block ends.\n";
+
 }
 
 
@@ -106,17 +114,11 @@ void parent(void* arg){
     cout << "thread 2 created\n";
   }
 
-  if (thread_create((thread_startfunc_t) block, (void*) 100) < 0){
+  if (thread_create((thread_startfunc_t) broadcast, (void*) 100) < 0){
     cout << "thread 3 failed\n";
     exit(1);
   }else{
     cout << "thread 3 created\n";
-  }
-   if (thread_create((thread_startfunc_t) broadcast, (void*) 100) < 0){
-    cout << "thread 4 failed\n";
-    exit(1);
-  }else{
-    cout << "thread 4 created\n";
   }
 }
 
