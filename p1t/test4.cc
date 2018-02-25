@@ -94,6 +94,7 @@ void two(void* arg){
   	}else{
   		cout << "thread2 unlock1 successful. Correct\n";
   	}
+  	exit(0);
 
 
 }
@@ -103,14 +104,14 @@ void parent(void* arg){
 	cout << "thread enters parent\n";
   if (thread_create((thread_startfunc_t) one, (void*) 100) < 0){
     cout << "thread 1 failed\n";
-    exit(0);
+    exit(1);
   }else{
     cout << "thread 1 created\n";
   }
 
   if (thread_create((thread_startfunc_t) two, (void*) 100) < 0){
     cout << "thread 2 failed\n";
-    exit(0);
+    exit(1);
   }else{
     cout << "thread 2 created\n";
   }

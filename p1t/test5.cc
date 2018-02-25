@@ -23,7 +23,6 @@ int main() {
 
 	if (thread_yield() < 0){
 		cout << "thread yield fail. Exit correctly.\n";
-		exit(0);
 	} else {
 		cout << "thread yield succeeded. Wrong output.\n";
 	}
