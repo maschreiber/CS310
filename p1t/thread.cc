@@ -286,6 +286,7 @@ int thread_unlock(unsigned int lock){
     interrupt_enable2();
     return -1;
   }
+  //check errors: if running thread does not own this lock, this lock owned by null, or lock doesnt exist
   if (LOCK_OWNER_MAP.count(lock) == 0 || LOCK_OWNER_MAP[lock] == NULL || LOCK_OWNER_MAP[lock] != RUNNING_THREAD) {
     interrupt_enable2();
     return -1;

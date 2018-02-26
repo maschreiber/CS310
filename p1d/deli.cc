@@ -151,8 +151,6 @@ void* startf(void* arg){
     //cout << "\n thread created";
   }
   //cout << "\nmaster created";
-
-  
   
 }
 
