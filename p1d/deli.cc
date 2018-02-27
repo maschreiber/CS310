@@ -60,8 +60,7 @@ void* cashier(void* a) {
       //1. CORK_BOARD is full.
       //2. CORK_BOARD already has a non-null order for this thread
     while (CORK_BOARD.size() == max_order || CASHIER_MAP[cashier_id] == 1) {
-      // Make thread wait until maker will allow more orders. Maker will signal upon completion.
-
+      
       if (CASHIER_MAP[cashier_id] == 1){
         //waiting on this cashier thread previous order to finish
       //cout << "*putting in prev wait:  cashier id: " << cashier_id << " sandwich id: " << ORDER_RECEIVED[cashier_id].front()->sid << "\n";
@@ -69,6 +68,7 @@ void* cashier(void* a) {
       }
       
       if (CORK_BOARD.size() == max_order) {
+        // Make thread wait until maker will allow more orders. Maker will signal upon completion.
       //cout << "*putting in full wait:  cashier id: " << cashier_id << " sandwich id: " << ORDER_RECEIVED[cashier_id].front()->sid << "\n";
         thread_wait(1, 1);
       }
@@ -98,6 +98,7 @@ void* cashier(void* a) {
 }
 
 int getClosestSandwich() {
+  //get the index of the next sandwich on the corkboard whose id is closest to the current sandwich, start from -1
   int min_distance_index = 0;
   for (int i = 0; i < CORK_BOARD.size(); i++) {
     if ((abs((CORK_BOARD.at(i)->sid) - previousSandwich)) < (abs((CORK_BOARD.at(min_distance_index)->sid) - previousSandwich))) {
@@ -132,8 +133,9 @@ void* maker(){
     if (ORDER_RECEIVED[this_sandwich_order->cid].size() == 0){
       cashier_count--;
     }
-
+    //broadcast to who are waiting for board to have a spot
     thread_broadcast(1, 1);
+    //boradcast to who are waiting for their previous order to be done
     thread_broadcast(1, 2);
     
 
@@ -142,15 +144,16 @@ void* maker(){
 }
 
 void* startf(void* arg){
+  //create one thread for maker
   thread_create((thread_startfunc_t) maker, (void*) 100);
 
+  //create a variable number of cashiers based on terminal input
   for (int cashier_id = 0; cashier_id < cashier_count; cashier_id++) {
     CASHIER_MAP.insert(pair<int, int>(cashier_id, 0));
 
     thread_create((thread_startfunc_t) cashier, (void*) cashier_id);
     //cout << "\n thread created";
   }
-  //cout << "\nmaster created";
   
 }
 
@@ -159,14 +162,14 @@ void* startf(void* arg){
 
 int main(int argc, char *argv[]){
   max_order = atoi(argv[1]);
-  cashier_count = argc - 2;
+  cashier_count = argc - 2; // - deli - board_max_order
   if (cashier_count < max_order){
     max_order = cashier_count;
   }
   //cout << "\n max order is: " << max_order;
 
   //read in the cashier id and sandwhich orders in order received
-  for (int i = 2; i < argc; i++){
+  for (int i = 2; i < argc; i++){ // check use of ifstream  http://www.cplusplus.com/doc/tutorial/files/
     //for each input file = for each cashier
     ifstream sw_input;
     int new_cid = i - 2; // cashier id
@@ -176,7 +179,7 @@ int main(int argc, char *argv[]){
     sw_input.open(argv[i]);
 
     //for each sandwich order in cashier #
-    if (sw_input.is_open()) // this part we learned how to use ifstream from http://www.cplusplus.com/doc/tutorial/files/
+    if (sw_input.is_open()) 
     {
       while (getline(sw_input, new_sid_s)){
         int new_sid = atoi(new_sid_s.c_str()); //sandwich id in string
@@ -187,6 +190,7 @@ int main(int argc, char *argv[]){
         //cout << "\ngot input" << neworder->sid << " " << neworder->cid;
       }
       sw_input.close();
+      //where all inputs of cashier and their orders are stored
       ORDER_RECEIVED.insert(pair<int, queue<SANDWICH_ORDER*> >(new_cid, new_order_q));
     }else{
       //cout << "\nsw input not open";
