@@ -37,22 +37,37 @@ maker thread should only handle a request when the cork board has the largest po
 
 */
 
+//a struct for a sandwich order which contains the cashier id and the sanwich id
 struct SANDWICH_ORDER{
   int sid; //sandwich id
   int cid; //cashier id
 };
 
+//An arraylist of index for keeping insersion order of sandwich orders
 vector<SANDWICH_ORDER*> CORK_BOARD; //int = order_number, 
+
+//A Map of cashier id to the status of this cashier if its previous order has been done yet
 map<int, int> CASHIER_MAP; //key = cashier_id, value = 0 if can push order, 1 if cannot, 2 if done
+
+//the max_order the cork board can hold, min(max_order, cashier_count) is used when numbers start changing
 int max_order;
+
+//the total number of alive cashiers
 int cashier_count;
+
+//the start int for calculating the closest id of the next sandwich the maker should grab from cork board
 int previousSandwich = -1;
 
+//a map of all orders that need to be done by master based on each cashier
 map<int, queue<SANDWICH_ORDER*> > ORDER_RECEIVED; //int = cashier id, queue is a queue of sandwich orders: order_q
 
+
 void* cashier(void* a) {
-  //cout << "hi";
+  //the cashier thread which handles whether the cashier can push its order to master or should wait
+  
   int cashier_id = (long int) a;
+
+  //while the cashier still have orders to complete
   while (!ORDER_RECEIVED[cashier_id].empty()) {
     //cout << "\ncork board size = " << CORK_BOARD.size() << " and max order = " << max_order << " and cashiermap = " << CASHIER_MAP[cashier_id];
     thread_lock(1);
@@ -97,6 +112,7 @@ void* cashier(void* a) {
 
 }
 
+
 int getClosestSandwich() {
   //get the index of the next sandwich on the corkboard whose id is closest to the current sandwich, start from -1
   int min_distance_index = 0;
@@ -109,6 +125,7 @@ int getClosestSandwich() {
 }
 
 void* maker(){
+  //the sandwich maker thread that takes orders from the cork board, wait if corkboard not full
   // While we are not finished or there is something left to do:
   // We keep looping till both the cashier count and board size are 0.
   while (cashier_count > 0 || CORK_BOARD.size() > 0) {
@@ -161,6 +178,7 @@ void* startf(void* arg){
 
 
 int main(int argc, char *argv[]){
+  //Grab input from terminal and store them into global variables, call libinit
   max_order = atoi(argv[1]);
   cashier_count = argc - 2; // - deli - board_max_order
   if (cashier_count < max_order){
@@ -196,6 +214,8 @@ int main(int argc, char *argv[]){
       //cout << "\nsw input not open";
     }
   }
+
+  //Let's start!
 
   thread_libinit( (thread_startfunc_t) startf, (void*) 100);
   return 0;
