@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <stdint.h>
 #include <ucontext.h>
 #include <deque>
 #include <queue>
@@ -124,8 +125,8 @@ void* startf(void* arg){
   //create a variable number of cashiers based on terminal input
   for (int cashier_id = 0; cashier_id < cashier_count; cashier_id++) {
     CASHIER_MAP.insert(pair<int, int>(cashier_id, 0));
-
-    thread_create((thread_startfunc_t) cashier, (void*) cashier_id);
+    int n_cid = (intptr_t) cashier_id;
+    thread_create((thread_startfunc_t) cashier, (void*) n_cid);
     //cout << "\n thread created";
   }
   
