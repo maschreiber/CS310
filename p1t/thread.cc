@@ -19,31 +19,38 @@ int thread_wait(unsigned int lock, unsigned int cond); //call switch
 int thread_signal(unsigned int lock, unsigned int cond);
 int thread_broadcast(unsigned int lock, unsigned int cond);
 static void cleanup();
-static void check_ready_queue();
-static void switchtodeletethread();
+static void process(thread_startfunc_t func, void* arg);
+static void swapToSwitchThread();
 static void switchtorunningthread();
 
-
+// TCB contains user context and thread status.
 struct TCB {
-  //TCB contains information for this thread, ucontext, ucontext->stack info, status indicating if this thread could be cleaned up by delete thread
-  ucontext_t* ucontext; //pointer to ucontext of this thread
-  int status; //3 for ready to clean up
+  ucontext_t* ucontext; // Contains stack pointer to simulate thread switching.
+  int status; // 0 for not finished, 3 for cleanup (1 and 2 were supposed to be for lock/CV block respectivelty but not implemented)
 };
 
-static TCB* RUNNING_THREAD; //the head of the ready queue
-static TCB* DELETE_THREAD; //the thread that handles the deletion of the running queue that status is 3
+// Global variable keeps tracking of the currently running thread.
+static TCB* RUNNING_THREAD;
 
-//map of queues for multiple locks/cvs
-//Possible error: queue is a context adaptor, therefore it could not be initiated and put into try catches
-static queue<TCB*> READY_QUEUE; //a queue of ready threads waiting to run
-static map<unsigned int, queue<TCB*> > LOCK_QUEUE_MAP; //a map of waiting queues for each lock
-static map<pair<unsigned int, unsigned int>, queue<TCB*> > CV_QUEUE_MAP; //a map of cv waiting queues for each lock-cond pair
-static map<unsigned int, TCB*> LOCK_OWNER_MAP; //maps the lock id to its owner
+// Thread which handles switching of threads. Also handles cleanup upon completion of execution.
+static TCB* SWITCH_THREAD;
 
-//bool to check if libinit is initiated before other methods are called
+// Ready queue holds all threads which are ready.
+static queue<TCB*> READY_QUEUE;
+
+// Lock queue map is a structure to hold a queue of threads waiting for a specific lock
+static map<unsigned int, queue<TCB*> > LOCK_QUEUE_MAP;
+
+// CV wait queue map is a structure to hold a queue of threads waiting for a signal of a lock, condiition variable pair.
+static map<pair<unsigned int, unsigned int>, queue<TCB*> > CV_QUEUE_MAP;
+
+// Lock owner map tells us which thread owns a specific lock.
+static map<unsigned int, TCB*> LOCK_OWNER_MAP;
+
+// No thread library calls can be made without initializing the library first through thread_libint(...);
 static bool islib = false;
 
-//interrupt
+// Created new functions for interrupts so we could globally disable and enable for testing by commenting out the method body.
 void interrupt_enable2() {
   interrupt_enable();
 }
@@ -52,17 +59,19 @@ void interrupt_disable2() {
   interrupt_disable();
 }
 
-static void switchtodeletethread(){
-  swapcontext(RUNNING_THREAD->ucontext, DELETE_THREAD->ucontext);
+// Shorter call to swap to the switch thread from the running thread.
+static void swapToSwitchThread(){
+  swapcontext(RUNNING_THREAD->ucontext, SWITCH_THREAD->ucontext);
 }
 
-static void switchtorunningthread(){
-  swapcontext(DELETE_THREAD->ucontext, RUNNING_THREAD->ucontext);
+// Shorter call to swap to the running thread from the switch thread.
+static void swapToRunningThread(){
+  swapcontext(SWITCH_THREAD->ucontext, RUNNING_THREAD->ucontext);
 }
 
-static void cleanup(){
+// Cleans up the thread if it is not null by deleting the stack, ucontext, and thread itself.
+static void cleanup() {
   if (RUNNING_THREAD == NULL) {
-    //first running thread will call this
     return;
   }
   if (RUNNING_THREAD->status == 3){
@@ -77,64 +86,104 @@ static void cleanup(){
   }
 }
 
-static void check_ready_queue(){
+
+static void process(thread_startfunc_t func, void *arg) {
+
+  //switch to RUNNING_THREAD thread to start func
+  //interrupt_disable2();
+  //switchtorunningthread();
+
+  // While the ready queue still has threads to run.
   while (!READY_QUEUE.empty()) {
+    // Always try to delete thread if it is done.
     cleanup();
+    // RUNNING_THREAD is set to be the head of next ready queue.
     RUNNING_THREAD = READY_QUEUE.front();
     READY_QUEUE.pop();
-    switchtorunningthread();
+
+    // swapcontext into next thread from this thread
+    swapToRunningThread();
   }
+  // At this point, ALL threads are done running or deadlocked.
+  // Do one last cleanup call.
+  cleanup();
+  // Exit.
+  cout << "Thread library exiting.\n";
+  exit(0);
 }
 
+// Initializes the thread library.
 int thread_libinit(thread_startfunc_t func, void *arg) {
   if (islib) {
-    //printf("Thread library must be islibialized first. Call thread_libislib first.");
+    // printf("Thread library cannot be reinitialized.");
     return -1;
   }
 
   islib = true;
 
+  // Code from specification to set up a new thread. We will initialize the SWITCH_THREAD first.
   try {
-    //initiazte delete thread struct variables
-    DELETE_THREAD = new TCB;
-    DELETE_THREAD->status = 0;
+    // Initialize switch thread struct variables.
+    SWITCH_THREAD = new TCB;
+    SWITCH_THREAD->status = 0;
 
-    //set ucontext this structure is from 310 p1 spec at cps310/p1.html
-    DELETE_THREAD->ucontext = new ucontext_t;
-    getcontext(DELETE_THREAD->ucontext);
-    DELETE_THREAD->ucontext->uc_stack.ss_sp = new char [STACK_SIZE];
-    DELETE_THREAD->ucontext->uc_stack.ss_size = STACK_SIZE;
-    DELETE_THREAD->ucontext->uc_stack.ss_flags = 0;
-    DELETE_THREAD->ucontext->uc_link = NULL;
+    // Set up the ucontext.
+    SWITCH_THREAD->ucontext = new ucontext_t;
+    getcontext(SWITCH_THREAD->ucontext);
+    SWITCH_THREAD->ucontext->uc_stack.ss_sp = new char [STACK_SIZE];
+    SWITCH_THREAD->ucontext->uc_stack.ss_size = STACK_SIZE;
+    SWITCH_THREAD->ucontext->uc_stack.ss_flags = 0;
+    SWITCH_THREAD->ucontext->uc_link = NULL;
+    makecontext(SWITCH_THREAD->ucontext, (void (*)()) process, 2, func, arg);
   }
-  catch (bad_alloc bad) {
-    delete (char*) DELETE_THREAD->ucontext->uc_stack.ss_sp;
-    delete DELETE_THREAD->ucontext;
-    delete DELETE_THREAD;
+  catch (bad_alloc b) {
+    delete (char*) SWITCH_THREAD->ucontext->uc_stack.ss_sp;
+    delete SWITCH_THREAD->ucontext;
+    delete SWITCH_THREAD;
     return -1;
   }
 
-  if (thread_create(func, arg) == -1){
+  // Create the thread which runs the parent method given to libinit.
+  if (thread_create(func, arg) == -1) {
     return -1;
   }
 
-  //start running the first thread and func
+  // Since thread_create(...) added the thread to the ready queue, we should go ahead and pop it off to run it.
+  RUNNING_THREAD = READY_QUEUE.front();
+  READY_QUEUE.pop();
+
+  // Call the function manually.
+  func(arg);
   interrupt_disable2();
-  //only exit check ready queue when no ready queue left to be run
-  check_ready_queue();
 
-  // no runnable threads in the system, or all threads are deadlocked
-  cout << "Thread library exiting.\n";
-  exit(0);
+  // Once the function has been called and executed, we swap to switch thread for cleanup and so that we may run our
+  // next thread if there are any. We set the first thread status to complete.
+  RUNNING_THREAD->status = 3;
+  swapToSwitchThread();
 }
 
+// "Trampoline method" as described on Piazza and lecture
+static void STUB(thread_startfunc_t func, void *arg) {
 
+  // We enable interrupts before since this method begins execution directly after a swapcontext. We always must disable
+  // interrupts before swapcontext, and so must enable them to begin.
+  interrupt_enable2();
+  func(arg);
+  interrupt_disable2();
 
+  // The thread is done executing.
+  RUNNING_THREAD->status = 3;
+
+  // Switch to the switch thread to clean this finished thread up and get the next one off of the ready queue.
+  swapToSwitchThread();
+}
+
+// Creates a new thread with the given start function and arguments.
 int thread_create(thread_startfunc_t func, void *arg) {
   interrupt_disable2();
 
   if (!islib) {
-    //printf("Thread library must be islibialized first. Call thread_libislib first.");
+    // printf("Thread library must be initialized first. Call thread_libinit(...) first.");
     interrupt_enable2();
     return -1;
   }
@@ -150,70 +199,62 @@ int thread_create(thread_startfunc_t func, void *arg) {
     */
 
   TCB* newThread;
-  //try catch errors in initiating ucontext
   try {
-    //intitate struct variables
+    // Initialize struct variables
     newThread = new TCB;
-    
-    //set context for newthread's ucontext
+    newThread->status = 0;
+
+    // Setup the ucontext and give it the input function to execute.
     newThread->ucontext = new ucontext_t;
     getcontext(newThread->ucontext);
-    newThread->ucontext->uc_stack.ss_sp = new char [STACK_SIZE]; //this is the stack created for this thread, remember to cast to char* when deleting
+    newThread->ucontext->uc_stack.ss_sp = new char [STACK_SIZE];
     newThread->ucontext->uc_stack.ss_size = STACK_SIZE;
     newThread->ucontext->uc_stack.ss_flags = 0;
     newThread->ucontext->uc_link = NULL;
-    //make context that runs STUB, i.e. func and arg
     makecontext(newThread->ucontext, (void (*)())STUB, 2, func, arg);
+
+    // Push the thread on to the ready queue, since it is now ready.
+    READY_QUEUE.push(newThread);
   }
-  catch (bad_alloc bad) {
-    delete (char*) newThread->ucontext->uc_stack.ss_sp; //delete stack
-    delete newThread->ucontext; //delete ucontext
-    delete newThread; //delete thread
+  catch (bad_alloc b) {
+    delete (char*) newThread->ucontext->uc_stack.ss_sp;
+    delete newThread->ucontext;
+    delete newThread;
     interrupt_enable2();
     return -1;
   }
-  //update status to 0
-  newThread->status = 0;
-  //push this thread to ready queue but do not run right now
-  READY_QUEUE.push(newThread);
-
   interrupt_enable2();
   return 0;
 }
 
-static void STUB(thread_startfunc_t func, void *arg) {
-
-  interrupt_enable2();
-  func(arg);
-  interrupt_disable2();
-
-  RUNNING_THREAD->status = 3;
-  switchtodeletethread();
-}
-
+// Yields to the next thread on the ready queue, and current thread is placed at the end of ready queue.
 int thread_yield(void) {
   interrupt_disable2();
   if (!islib) {
-    //printf("Thread library must be islibialized first. Call thread_libislib first.");
+    // printf("Thread library must be initialized first. Call thread_libinit(...) first.");
     interrupt_enable2();
     return -1;
   }
-  //cout << "Adding a thread back to READY_QUEUE queue " << RUNNING_THREAD << "\n";
+
+  // Push current thread to back of the ready queue.  
   READY_QUEUE.push(RUNNING_THREAD);
-  switchtodeletethread();
+
+  //Switch to the switch thread to get the next one off of the ready queue.
+  swapToSwitchThread();
   interrupt_enable2();
   return 0;
 }
 
+// Assigns lock to a thread.
 int thread_lock(unsigned int lock){
   // Thread lock must not be interrupted because two threads might end up holding lock.
   interrupt_disable2();
   if (!islib) {
-    //printf("Thread library must be islibialized first. Call thread_libislib first.");
+    // printf("Thread library must be initialized first. Call thread_libinit(...) first.");
     interrupt_enable2();
     return -1;
   }
-  // Calling for the lock while holding it is an error.
+  // Cannot try to re-lock if lock is already held.
   if (LOCK_OWNER_MAP[lock] == RUNNING_THREAD) {
     interrupt_enable2();
     return -1;
@@ -228,7 +269,7 @@ int thread_lock(unsigned int lock){
   // If the lock is owned by another thread.
   if (LOCK_OWNER_MAP[lock] != NULL) {
     LOCK_QUEUE_MAP[lock].push(RUNNING_THREAD); // Push current thread to end of ready queue.
-    switchtodeletethread(); // Switch thread to run the head of the ready queue.
+    swapToSwitchThread(); // Switch thread to run the head of the ready queue.
   } else {
     LOCK_OWNER_MAP[lock] = RUNNING_THREAD; // Give lock to this thread.
   }
@@ -238,16 +279,19 @@ int thread_lock(unsigned int lock){
   return 0;
 }
 
-
+// Takes away lock from thread.
 int thread_unlock(unsigned int lock){
   // Disable interrupts for successful unlocks.
   interrupt_disable2();
 
   if (!islib) {
-    //printf("Thread library must be islibialized first. Call thread_libislib first.");
+    // printf("Thread library must be initialized first. Call thread_libnit(...) first.");
     interrupt_enable2();
     return -1;
   }
+
+  // If no one holds the lock, if the lock owner is null, or if the current thread doesn't hold the lock,
+  // attempting to unlock the lock is an error.
   if (LOCK_OWNER_MAP.count(lock) == 0 || LOCK_OWNER_MAP[lock] == NULL || LOCK_OWNER_MAP[lock] != RUNNING_THREAD) {
     interrupt_enable2();
     return -1;
@@ -268,28 +312,16 @@ int thread_unlock(unsigned int lock){
   return 0;
 }
 
+// Waits for a lock, condition variable pair to be signaled.
 int thread_wait(unsigned int lock, unsigned int cond) {
   interrupt_disable2();
   if (!islib) {
-    ////printf("Thread library must be islibialized first. Call thread_libislib first.");
+    // printf("Thread library must be initialized first. Call thread_libinit(...) first.");
     interrupt_enable2();
     return -1;
   }
-  
-  /*
 
-  The reason why did not want to call thread_unlock(lock, cond) for unlocking is because if use:
-
-  enable interrupt
-  call thread_unlock
-  disable interrupt
-
-  and realize that this may lead to startpreempt inside the thread_wait() function and is not safe
-  Therefore, the most secure way to unlock is just to copy the body of thread unlock without the interrupt handlers
-
-  */
-
-  // We must have a successful unlock
+  // The code below is copied from unlock, because we have to unlock the held lock.
   if (LOCK_OWNER_MAP.count(lock) == 0 || LOCK_OWNER_MAP[lock] == NULL || LOCK_OWNER_MAP[lock] != RUNNING_THREAD) {
     interrupt_enable2();
     return -1;
@@ -304,7 +336,7 @@ int thread_wait(unsigned int lock, unsigned int cond) {
     LOCK_OWNER_MAP[lock] = LOCK_QUEUE_MAP[lock].front(); // Hand-off lock: Piazza @439
     LOCK_QUEUE_MAP[lock].pop(); // Remove thread from blocked queue.
   }
-  // If CV waiting queue is not islibialized, we islibialize it.
+  // If CV waiting queue is not initialized, we initialize it.
   pair<unsigned int, unsigned int> lock_cond_pair = make_pair(lock,cond);
   if (CV_QUEUE_MAP.find(lock_cond_pair) == CV_QUEUE_MAP.end()){
     queue<TCB*> NEW_CV_QUEUE;
@@ -313,16 +345,17 @@ int thread_wait(unsigned int lock, unsigned int cond) {
   // Push thread to tail of CV waiting queue.
   CV_QUEUE_MAP[lock_cond_pair].push(RUNNING_THREAD);
   // Switch thread so that thread from the front of ready queue runs.
-  switchtodeletethread();
+  swapToSwitchThread();
   interrupt_enable2();
   // After returning from swapcontext and being awoken, we must first reacquire the lock.
   return thread_lock(lock);
 }
 
+// Signals a thread that is waiting for a lock condition variable pair to wake up.
 int thread_signal(unsigned int lock, unsigned int cond){
   interrupt_disable2();
   if (!islib) {
-    //printf("Thread library must be islibialized first. Call thread_libislib first.");
+    // printf("Thread library must be initialized first. Call thread_libinit(...) first.");
     interrupt_enable2();
     return -1;
   }
@@ -336,10 +369,11 @@ int thread_signal(unsigned int lock, unsigned int cond){
   return 0;
 }
 
+// Exactly the same signal except it releases the entire queue,
 int thread_broadcast(unsigned int lock, unsigned int cond) {
   interrupt_disable2();
   if (!islib) {
-    //printf("Thread library must be islibialized first. Call thread_libislib first.");
+    // printf("Thread library must be initialized first. Call thread_libinit(...) first.");
     interrupt_enable2();
     return -1;
   }
