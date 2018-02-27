@@ -25,45 +25,12 @@ int thread_unlock(unsigned int lock);
 int thread_wait(unsigned int lock, unsigned int cond); //call switch
 int thread_signal(unsigned int lock, unsigned int cond);
 int thread_broadcast(unsigned int lock, unsigned int cond);
-
-static void cleanup();
-static void check_ready_queue();
-static void switchtodeletethread();
-static void switchtorunningthread();
 ```
 
 ### Test cases
 
 The test cases are created for testing bugs in thread libraries.
 Specific purposes of the test cases are written in the comments inside the test#.cc files.
-
-```
------- grading student test case test11.cc ------
-student test case test11.cc exposed the following instructor buggy thread libraries: B H I J L
------- grading student test case test13.cc ------
-student test case test13.cc exposed the following instructor buggy thread libraries: L
------- grading student test case test8.cc ------
-student test case test8.cc exposed the following instructor buggy thread libraries: M
------- grading student test case test2.cc ------
-student test case test2.cc exposed the following instructor buggy thread libraries: B H I J
------- grading student test case test3.cc ------
-student test case test3.cc exposed the following instructor buggy thread libraries: A B D E F I J K
------- grading student test case test5.cc ------
-student test case test5.cc exposed the following instructor buggy thread libraries: M
------- grading student test case test6.cc ------
-student test case test6.cc exposed the following instructor buggy thread libraries: B I L
------- grading student test case test4.cc ------
-student test case test4.cc exposed the following instructor buggy thread libraries: A B E F L
------- grading student test case test12.cc ------
-student test case test12.cc exposed the following instructor buggy thread libraries: H
------- grading student test case test9.cc ------
-student test case test9.cc exposed the following instructor buggy thread libraries: A B E F I L
------- grading student test case test7.cc ------
-student test case test7.cc exposed the following instructor buggy thread libraries: B H I J
-
-overall student test suite exposed 11 of the 13 instructor buggy thread libraries
-grade for thread library test suite: 14 out of 14
-```
 
 
 ## Acknowledgments
