@@ -13,7 +13,7 @@
 #include <sstream>
 using namespace std;
 //using deque instead of queue so i can initiate it
-
+// using vector instead of map so can ensure insertion order of sandwiches on the corkboard when 2 sandwiches have the same id
 
 /* 
 Sandwich: id 0~999
