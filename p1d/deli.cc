@@ -62,117 +62,11 @@ int previousSandwich = -1;
 map<int, queue<SANDWICH_ORDER*> > ORDER_RECEIVED; //int = cashier id, queue is a queue of sandwich orders: order_q
 
 
-void* cashier(void* a) {
-  //the cashier thread which handles whether the cashier can push its order to master or should wait
-  
-  int cashier_id = (long int) a;
+int main(int argc, char *argv[]);
+void* startf(void* arg);
+void* maker();
+void* cashier(void* a);
 
-  //while the cashier still have orders to complete
-  while (!ORDER_RECEIVED[cashier_id].empty()) {
-    //cout << "\ncork board size = " << CORK_BOARD.size() << " and max order = " << max_order << " and cashiermap = " << CASHIER_MAP[cashier_id];
-    thread_lock(1);
-    // Wait while we can't submit an order for a variety of reasons
-      //1. CORK_BOARD is full.
-      //2. CORK_BOARD already has a non-null order for this thread
-    while (CORK_BOARD.size() == max_order || CASHIER_MAP[cashier_id] == 1) {
-      
-      if (CASHIER_MAP[cashier_id] == 1){
-        //waiting on this cashier thread previous order to finish
-      //cout << "*putting in prev wait:  cashier id: " << cashier_id << " sandwich id: " << ORDER_RECEIVED[cashier_id].front()->sid << "\n";
-        thread_wait(1, 2);
-      }
-      
-      if (CORK_BOARD.size() == max_order) {
-        // Make thread wait until maker will allow more orders. Maker will signal upon completion.
-      //cout << "*putting in full wait:  cashier id: " << cashier_id << " sandwich id: " << ORDER_RECEIVED[cashier_id].front()->sid << "\n";
-        thread_wait(1, 1);
-      }
-
-      
-      
-    }
-    //cout << "\nDid you reach here = " << cashier_id;
-    if (!ORDER_RECEIVED[cashier_id].empty()) {
-      CORK_BOARD.push_back(ORDER_RECEIVED[cashier_id].front());
-      CASHIER_MAP[cashier_id] = 1;
-      cout << "POSTED: cashier " << cashier_id << " sandwich " << ORDER_RECEIVED[cashier_id].front()->sid << endl; 
-      ORDER_RECEIVED[cashier_id].pop();
-    }
-    
-    if (CORK_BOARD.size() == min(cashier_count, max_order)) {
-      // Let the maker know to start processing orders if the board is now full.
-      
-      thread_signal(1, 3);
-    }
-    thread_unlock(1);
-  }
-
-  //cashier is done
-  CASHIER_MAP[cashier_id] = 2;
-
-}
-
-
-int getClosestSandwich() {
-  //get the index of the next sandwich on the corkboard whose id is closest to the current sandwich, start from -1
-  int min_distance_index = 0;
-  for (int i = 0; i < CORK_BOARD.size(); i++) {
-    if ((abs((CORK_BOARD.at(i)->sid) - previousSandwich)) < (abs((CORK_BOARD.at(min_distance_index)->sid) - previousSandwich))) {
-      min_distance_index = i;
-    } 
-  }
-  return min_distance_index;
-}
-
-void* maker(){
-  //the sandwich maker thread that takes orders from the cork board, wait if corkboard not full
-  // While we are not finished or there is something left to do:
-  // We keep looping till both the cashier count and board size are 0.
-  while (cashier_count > 0 || CORK_BOARD.size() > 0) {
-    thread_lock(1);
-    // Wait while we can't start operating. That would happen if the board wasn't full.
-    while (CORK_BOARD.size() < min(cashier_count, max_order)) {
-      
-      thread_wait(1, 3);
-    }
-
-    int idx = getClosestSandwich(); //vector keeps order of insertion
-    SANDWICH_ORDER* this_sandwich_order = CORK_BOARD[idx];
-    CORK_BOARD.erase(CORK_BOARD.begin() + idx);
-
-    //get cashier id, changes cashier status
-    CASHIER_MAP[this_sandwich_order->cid] = 0; //cashier is free
-
-    previousSandwich = this_sandwich_order->sid;
-    cout << "READY: cashier " << this_sandwich_order->cid << " sandwich " << this_sandwich_order->sid << endl; 
-
-    //if cashier is empty delete it
-    if (ORDER_RECEIVED[this_sandwich_order->cid].size() == 0){
-      cashier_count--;
-    }
-    //broadcast to who are waiting for board to have a spot
-    thread_broadcast(1, 1);
-    //boradcast to who are waiting for their previous order to be done
-    thread_broadcast(1, 2);
-    
-
-    thread_unlock(1);
-  }
-}
-
-void* startf(void* arg){
-  //create one thread for maker
-  thread_create((thread_startfunc_t) maker, (void*) 100);
-
-  //create a variable number of cashiers based on terminal input
-  for (int cashier_id = 0; cashier_id < cashier_count; cashier_id++) {
-    CASHIER_MAP.insert(pair<int, int>(cashier_id, 0));
-
-    thread_create((thread_startfunc_t) cashier, (void*) cashier_id);
-    //cout << "\n thread created";
-  }
-  
-}
 
 
 
@@ -221,3 +115,121 @@ int main(int argc, char *argv[]){
   return 0;
 
 }
+
+
+void* startf(void* arg){
+  //create one thread for maker
+  thread_create((thread_startfunc_t) maker, (void*) 100);
+
+  //create a variable number of cashiers based on terminal input
+  for (int cashier_id = 0; cashier_id < cashier_count; cashier_id++) {
+    CASHIER_MAP.insert(pair<int, int>(cashier_id, 0));
+
+    thread_create((thread_startfunc_t) cashier, (void*) cashier_id);
+    //cout << "\n thread created";
+  }
+  
+}
+
+
+
+
+void* cashier(void* a) {
+  //the cashier thread which handles whether the cashier can push its order to master or should wait
+  
+  int cashier_id = (long int) a;
+
+  //while the cashier still have orders to complete
+  while (!ORDER_RECEIVED[cashier_id].empty()) {
+    //cout << "\ncork board size = " << CORK_BOARD.size() << " and max order = " << max_order << " and cashiermap = " << CASHIER_MAP[cashier_id];
+    thread_lock(1);
+    // Wait while we can't submit an order for a variety of reasons
+      //1. CORK_BOARD is full.
+      //2. CORK_BOARD already has a non-null order for this thread
+    while (CORK_BOARD.size() == max_order || CASHIER_MAP[cashier_id] == 1) {
+      
+      if (CASHIER_MAP[cashier_id] == 1){
+        //waiting on this cashier thread previous order to finish
+      //cout << "*putting in prev wait:  cashier id: " << cashier_id << " sandwich id: " << ORDER_RECEIVED[cashier_id].front()->sid << "\n";
+        thread_wait(1, 2);
+      }
+      
+      if (CORK_BOARD.size() == max_order) {
+        // Make thread wait until maker will allow more orders. Maker will signal upon completion.
+      //cout << "*putting in full wait:  cashier id: " << cashier_id << " sandwich id: " << ORDER_RECEIVED[cashier_id].front()->sid << "\n";
+        thread_wait(1, 1);
+      }
+      
+    }
+    //cout << "\nDid you reach here = " << cashier_id;
+    if (!ORDER_RECEIVED[cashier_id].empty()) {
+      CORK_BOARD.push_back(ORDER_RECEIVED[cashier_id].front());
+      CASHIER_MAP[cashier_id] = 1;
+      cout << "POSTED: cashier " << cashier_id << " sandwich " << ORDER_RECEIVED[cashier_id].front()->sid << endl; 
+      ORDER_RECEIVED[cashier_id].pop();
+    }
+    
+    if (CORK_BOARD.size() == min(cashier_count, max_order)) {
+      // Let the maker know to start processing orders if the board is now full.
+      thread_signal(1, 3);
+    }
+    
+    thread_unlock(1);
+  }
+
+  //cashier is done
+  CASHIER_MAP[cashier_id] = 2;
+
+}
+
+
+int getClosestSandwich() {
+  //get the index of the next sandwich on the corkboard whose id is closest to the current sandwich, start from -1
+  int min_distance_index = 0;
+  for (int i = 0; i < CORK_BOARD.size(); i++) {
+    if ((abs((CORK_BOARD.at(i)->sid) - previousSandwich)) < (abs((CORK_BOARD.at(min_distance_index)->sid) - previousSandwich))) {
+      min_distance_index = i;
+    } 
+  }
+  return min_distance_index;
+}
+
+void* maker(){
+  //the sandwich maker thread that takes orders from the cork board, wait if corkboard not full
+  // While we are not finished or there is something left to do:
+  // We keep looping till both the cashier count and board size are 0.
+  while (cashier_count > 0 || CORK_BOARD.size() > 0) {
+    thread_lock(1);
+    // Wait while we can't start operating. That would happen if the board wasn't full.
+    while (CORK_BOARD.size() < min(cashier_count, max_order)) {
+      
+      thread_wait(1, 3);
+    }
+
+    int idx = getClosestSandwich(); //vector keeps order of insertion
+    SANDWICH_ORDER* this_sandwich_order = CORK_BOARD[idx];
+    CORK_BOARD.erase(CORK_BOARD.begin() + idx);
+
+    //get cashier id, changes cashier status
+    CASHIER_MAP[this_sandwich_order->cid] = 0; //cashier is free
+
+    //if cashier is empty delete it
+    if (ORDER_RECEIVED[this_sandwich_order->cid].size() == 0){
+      cashier_count--;
+    }
+
+    //update the id of sandwich to compare for next sandwich 
+    previousSandwich = this_sandwich_order->sid;
+
+    cout << "READY: cashier " << this_sandwich_order->cid << " sandwich " << this_sandwich_order->sid << endl; 
+
+    //broadcast to who are waiting for board to have a spot
+    thread_broadcast(1, 1);
+    //boradcast to who are waiting for their previous order to be done
+    thread_broadcast(1, 2);
+    
+
+    thread_unlock(1);
+  }
+}
+
