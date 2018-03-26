@@ -32,5 +32,6 @@ int main(int argc, char** argv) {
     printf("%s\n", attack_string);
     fp = fopen("shellcode.dat", "w");
     fprintf(fp, "%s", attack_string);
+    fclose(fp)
 }
    
