@@ -1,9 +1,25 @@
 package edu.duke.raft;
 
+import java.util.Timer;
+
+/*
+ * Leader's tasks:
+ * 1) Send periodic heartbeat to prevent timeout
+ * 2) command received from client: append entry to local log, respond after entry applied to state machine
+ * 3) If last log index > nextIndex for a follower send AppendEntries RPC with log entries
+ * 4) If response contains term T > currentTerm, set currentTerm = T, covert to follower
+ */
+
 public class LeaderMode extends RaftMode {
+	
+	private Timer timer;
+	private int timeout;
+	private int timerID;
+	
+	
   public void go () {
     synchronized (mLock) {
-      int term = 0;
+      int term = mConfig.getCurrentTerm();
       System.out.println ("S" + 
 			  mID + 
 			  "." + 
@@ -51,9 +67,17 @@ public class LeaderMode extends RaftMode {
     }
   }
 
-  // @param id of the timer that timed out
+  /*
+   * switch into follower if timer timeout
+   *  @param id of the timer that timed out
+   */
   public void handleTimeout (int timerID) {
-    synchronized (mLock) {
-    }
+		synchronized (mLock) {
+			FollwerMode follower - new FollowerMode();
+			if (timerID == mID) {
+				timer.cancel();
+				RaftServerImpl.setMode(follower);
+			}
+		}
   }
 }

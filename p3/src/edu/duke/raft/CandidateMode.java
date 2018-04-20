@@ -132,11 +132,16 @@ public class CandidateMode extends RaftMode {
 		}
 	}
 
-	// @param id of the timer that timed out
+	/*
+	 * If timer finishes, promote self to follower
+	 *  @param id of the timer that timed out
+	 */
 	public void handleTimeout (int timerID) {
 		synchronized (mLock) {
+			FollwerMode follower - new FollowerMode();
 			if (timerID == mID) {
-				
+				timer.cancel();
+				RaftServerImpl.setMode(follower);
 			}
 		}
 	}
