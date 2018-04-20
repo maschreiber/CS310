@@ -132,11 +132,36 @@ public class CandidateMode extends RaftMode {
 		}
 	}
 
-	// @param id of the timer that timed out
+	// If any of the votes return their term, we know we are unqualified to be leader and should step down.
+	
 	public void handleTimeout (int timerID) {
 		synchronized (mLock) {
 			if (timerID == mID) {
+				int term = mConfig.getCurrentTerm();
+				int [] votes = RaftResponses.getVotes(term);
 				
+				int votesForMe = 0;
+				int max_term = Integer.MIN_VALUE;
+				for (int vote : votes) {
+					if  (vote > term) {
+						max_term = Math.max(max_term, vote);
+					} else if (vote == 0) {
+						votesForMe++;
+					}
+				}
+				if (max_term > term) {
+					mConfig.setCurrentTerm(max_term, 0);
+					timer.cancel();
+					RaftServerImpl.setMode(new FollowerMode());
+					return;
+				}
+				if (votesForMe * 2 > mConfig.getNumServers()) {
+					timer.cancel();
+					RaftServerImpl.setMode(new LeaderMode());
+				} else {
+					timer.cancel();
+					this.go();
+				}
 			}
 		}
 	}
