@@ -69,7 +69,7 @@ public class FollowerMode extends RaftMode {
 			}
 			
 			mConfig.setCurrentTerm(candidateTerm, candidateID);
-			startTimer();
+			timer = startTimer();
 			return 0;
 		}
 	}
@@ -96,21 +96,21 @@ public class FollowerMode extends RaftMode {
 			
 			mConfig.setCurrentTerm(leaderTerm, 0);
 			
-			startTimer();
+			timer = startTimer();
 			Entry entry;
 			try {
 				entry = mLog.getEntry(leaderPrevLogIndex);
 				if (entry == null)
-					return -1;
+					return term;
 				else if (entry.term != leaderPrevLogTerm)
-					return -1;
+					return term;
 			} catch (IndexOutOfBoundsException e) {
-				return -1;
+				return term;
 			}
 			
 			int insertCode = mLog.insert(entries, leaderPrevLogIndex, leaderPrevLogTerm);
 			if (insertCode == -1)
-				return -1;
+				return term;
 			
 			if (leaderCommit > mCommitIndex)
 				mCommitIndex = Math.min(leaderCommit, insertCode);

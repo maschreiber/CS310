@@ -1,44 +1,105 @@
 package edu.duke.raft;
 
+import java.util.Timer;
+import java.util.concurrent.ThreadLocalRandom;
+
 public class CandidateMode extends RaftMode {
-	public void go () {
+	
+	private Timer timer;
+	private int timeout;
+	private int timerID;
+	
+	public void go() {
 		synchronized (mLock) {
 			// When a server first becomes a candidate, it increments its term.
 			int term = mConfig.getCurrentTerm();
 			term++;
 			mConfig.setCurrentTerm(term, mID);
 
-			//timer that periodically checks if majority has voted for this candidate
-
-
-			//sends request votes RPC to all other servers in parallel
-			for (int id = 0; id < mConfig.getNumServers (); id++){
-				remoteRequestVote (id, term, mID, mLog.getLastIndex(),mLog.getLastTerm());
-			}
-
-
 			System.out.println ("S" +
 					mID +
 					"." +
 					term +
 					": switched to candidate mode.");
+			
+			//Set timer that periodically checks if majority has voted for this candidate
+			timer = startTimer();
+			
+			RaftResponses.setTerm(term);
+			RaftResponses.clearVotes(term);
+
+			// Sends request votes RPC to all other servers in parallel
+			for (int server_id = 0; server_id < mConfig.getNumServers(); server_id++){
+				remoteRequestVote(server_id + 1, term, mID, mLog.getLastIndex(), mLog.getLastTerm());
+			}
+
+		}
+	}
+	
+	private Timer startTimer() {
+		synchronized (mLock) {
+			if (timer != null)
+				timer.cancel();
+			// Timeouts (one random, one user set)
+			int randomTime = ThreadLocalRandom.current().nextInt(ELECTION_TIMEOUT_MIN, ELECTION_TIMEOUT_MAX);
+			int overrideTime = mConfig.getTimeoutOverride();
+
+			// Prioritize validly set user timeouts over randomized timeout.
+			timeout = (overrideTime <= 0) ? randomTime : overrideTime;
+			timerID = mID;
+
+			return super.scheduleTimer(timeout, timerID);
 		}
 	}
 
-	// @param candidate’s term
-	// @param candidate requesting vote
-	// @param index of candidate’s last log entry
-	// @param term of candidate’s last log entry
-	// @return 0, if server votes for candidate; otherwise, server's
-	// current term
-	public int requestVote (int candidateTerm,
-			int candidateID,
-			int lastLogIndex,
-			int lastLogTerm) {
+	/**
+	 * Handles another server (perhaps itself) requesting a vote where this candidate is a candidate.
+	 * Grants vote if not yet voted, the candidate log is at least as up-to-date, and
+	 * the candidate term matches or exceeds. Denies vote if conditions are not met.
+	 * 
+	 * @param candidateTerm the current term of the candidate
+	 * @param candidateID server ID of the candidate
+	 * @param candidateLastLogIndex index of the candidate's last log entry
+	 * @param candidateLastLogTerm term of the candidate's last log entry
+	 * 
+	 * @return 0 if vote granted, server's current term if vote denied
+	 */
+	public int requestVote (int candidateTerm, int candidateID, int candidateLastLogIndex, int candidateLastLogTerm) {
 		synchronized (mLock) {
 			int term = mConfig.getCurrentTerm ();
-			int result = term;
-			return result;
+			
+			// Vote for itself
+			if (candidateID == mID)
+				return 0;
+			
+			// According to Piazza @854, you only vote for the other candidate if their term is strictly greater.
+			// If the candidate has a lower or equal term, do not vote for them.
+			if (term >= candidateTerm)
+				return term;
+			
+			startTimer();
+			
+			int lastLogTerm = mLog.getLastTerm();
+			int lastLogIndex = mLog.getLastIndex();
+			
+			boolean qualified_candidate = false;
+			if (lastLogTerm < candidateLastLogTerm) {
+				qualified_candidate = true;
+			} else if (lastLogTerm == candidateLastLogTerm && lastLogIndex <= candidateLastLogIndex) {
+				qualified_candidate = true;
+			}
+			
+			FollowerMode follower = new FollowerMode();
+			
+			if (!qualified_candidate) {
+				mConfig.setCurrentTerm(candidateTerm, 0);
+				RaftServerImpl.setMode(follower);
+				return candidateTerm;
+			}
+			
+			mConfig.setCurrentTerm(candidateTerm, candidateID);
+			RaftServerImpl.setMode(follower);
+			return 0;
 		}
 	}
 
@@ -65,7 +126,7 @@ public class CandidateMode extends RaftMode {
 			
 			// Step down if leader's term exceeds or matches.
 			mConfig.setCurrentTerm(leaderTerm, leaderID);
-			electionTimer.cancel();
+			timer.cancel();
 			RaftServerImpl.setMode(new FollowerMode());
 			return 0;
 		}
@@ -74,6 +135,9 @@ public class CandidateMode extends RaftMode {
 	// @param id of the timer that timed out
 	public void handleTimeout (int timerID) {
 		synchronized (mLock) {
+			if (timerID == mID) {
+				
+			}
 		}
 	}
 }
