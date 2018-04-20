@@ -16,7 +16,7 @@ public class RaftConfig {
   private int mNumServers=0;
   private int mTimeoutOverride=0;
   private Path mConfigPath=null;
-  
+
   final private String CURRENT_TERM = "CURRENT_TERM";
   final private String VOTED_FOR = "VOTED_FOR";
   final private String NUM_SERVERS = "NUM_SERVERS";
@@ -29,7 +29,7 @@ public class RaftConfig {
       mTimeoutOverride = -1;
       mConfigPath = FileSystems.getDefault().getPath (file);
       String delims = "=";
-      List<String> lines = Files.readAllLines (mConfigPath, 
+      List<String> lines = Files.readAllLines (mConfigPath,
 					       StandardCharsets.US_ASCII);
       int lineNum=1;
       for (String line : lines) {
@@ -46,23 +46,23 @@ public class RaftConfig {
 	  } else if (field.equals (ELECTION_TIMEOUT_OVERRIDE)) {
 	    mTimeoutOverride = Integer.parseInt (value);
 	  } else {
-	  System.out.println ("Error parsing " + 
-			      file + 
-			      "." + 
-			      lineNum + 
-			      ": " + 
+	  System.out.println ("Error parsing " +
+			      file +
+			      "." +
+			      lineNum +
+			      ": " +
 			      field);
 	  }
 	} else {
-	  System.out.println ("Error parsing " + 
-			      file + 
-			      "." + 
-			      lineNum + 
-			      ": " + 
+	  System.out.println ("Error parsing " +
+			      file +
+			      "." +
+			      lineNum +
+			      ": " +
 			      line);
-	}	
+	}
 	lineNum++;
-      }      
+      }
     } catch (IOException e) {
       System.out.println (e.getMessage ());
     }    
@@ -75,16 +75,16 @@ public class RaftConfig {
   public void setCurrentTerm (int term, int votedFor) {
     if (term > mCurrentTerm ) {
       try {
-	OutputStream out = Files.newOutputStream (mConfigPath, 
+	OutputStream out = Files.newOutputStream (mConfigPath,
 						  StandardOpenOption.APPEND,
 						  StandardOpenOption.SYNC);
 	out.write (
-	  new String (CURRENT_TERM + 
-		      "=" + 
+	  new String (CURRENT_TERM +
+		      "=" +
 		      term +
-		      '\n' + 
-		      VOTED_FOR + 
-		      "=" + 
+		      '\n' +
+		      VOTED_FOR +
+		      "=" +
 		      votedFor +
 		      '\n').getBytes ()
 		   );
@@ -106,7 +106,7 @@ public class RaftConfig {
   // @return who the server voted for in the current term (0 if none)
   public int getVotedFor () {
     return mVotedFor;
-  }    
+  }
 
   // @return the number of server
   public int getNumServers () {
@@ -119,12 +119,12 @@ public class RaftConfig {
   }
 
   public String toString () {
-    return new String (CURRENT_TERM + 
-		      "=" + 
+    return new String (CURRENT_TERM +
+		      "=" +
 		      mCurrentTerm +
-		      ", " + 
-		      VOTED_FOR + 
-		      "=" + 
+		      ", " +
+		      VOTED_FOR +
+		      "=" +
 		      mVotedFor);
   }
 
@@ -144,6 +144,5 @@ public class RaftConfig {
     // this should have no effect
     config.setCurrentTerm (config.getCurrentTerm () + 5, 0);
     System.out.println ("RaftConfig: " + config);
-  }  
+  }
 }
-

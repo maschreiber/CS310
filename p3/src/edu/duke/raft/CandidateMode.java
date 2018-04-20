@@ -3,11 +3,24 @@ package edu.duke.raft;
 public class CandidateMode extends RaftMode {
   public void go () {
     synchronized (mLock) {
-      int term = 0;      
-      System.out.println ("S" + 
-			  mID + 
-			  "." + 
-			  term + 
+      //when a server first becomes a candidate, it increments its term
+      int term = mConfig.getCurrentTerm ();
+      term += 1;
+      mConfig.setCurrentTerm (term,mID);
+
+      //timer that periodically checks if majority has voted for this candidate
+
+
+      //sends request votes RPC to all other servers in parallel
+      for (int id = 0; id < mConfig.getNumServers (); id++){
+          remoteRequestVote (id, term, mID, mLog.getLastIndex(),mLog.getLastTerm());
+      }
+
+
+      System.out.println ("S" +
+			  mID +
+			  "." +
+			  term +
 			  ": switched to candidate mode.");
     }
   }
@@ -17,7 +30,7 @@ public class CandidateMode extends RaftMode {
   // @param index of candidate’s last log entry
   // @param term of candidate’s last log entry
   // @return 0, if server votes for candidate; otherwise, server's
-  // current term 
+  // current term
   public int requestVote (int candidateTerm,
 			  int candidateID,
 			  int lastLogIndex,
@@ -28,7 +41,7 @@ public class CandidateMode extends RaftMode {
       return result;
     }
   }
-  
+
 
   // @param leader’s term
   // @param current leader
