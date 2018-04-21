@@ -87,7 +87,7 @@ public class LeaderMode extends RaftMode {
           remoteAppendEntries(server_id, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), mLog.getLastTerm(), new Entry[0], mCommitIndex);
         }else{
           //send log entries starting at nextIndex
-          Entry[] logEntries = new Entry[mLog.getLastIndex() - nextIndex[server_id] + 1]
+          Entry[] logEntries = new Entry[mLog.getLastIndex() - nextIndex[server_id] + 1];
           for (int i = 0; i < logEntries.length; i++){
             logEntries[i] = mLog.getEntry(i + nextIndex[server_id]);
           }
@@ -161,7 +161,7 @@ public class LeaderMode extends RaftMode {
         heartbeatTimer.cancel();
         //revert to follower
         RaftServerImpl.setMode(new FollowerMode());
-        mConfig.setCurrentTerm(candidateTerm, leaderID);
+        mConfig.setCurrentTerm(leaderTerm, leaderID);
       }
 
       else if (leaderTerm == mConfig.getCurrentTerm()){
@@ -172,7 +172,8 @@ public class LeaderMode extends RaftMode {
         }
 
     }
-    return -1;
+      return -1;
+    }
   }
 
   /*
@@ -189,8 +190,8 @@ public class LeaderMode extends RaftMode {
       if (timerID == heartbeatTimerID) {
 
         //check if the append entries rpc reponse has a term higher than leader
-        int[] appendResponses = RaftResponse.getAppendResponses(mConfig.getCurrentTerm());
-        for (int i = 1; i < appendResponses +1; i++){
+        int[] appendResponses = RaftResponses.getAppendResponses(mConfig.getCurrentTerm());
+        for (int i = 1; i < appendResponses.length +1; i++){
           //if response is 0, server appended entries
           //otherwise, server's curent term, append RPC failed
           if (appendResponses[i] <= 0){
@@ -199,13 +200,13 @@ public class LeaderMode extends RaftMode {
           if (appendResponses[i] > 0){
             int followerTerm = appendResponses[i];
             //if follwer term is larger than current term/leader term
-            if (followerTerm > mConfig.currentTerm()){
+            if (followerTerm > mConfig.getCurrentTerm()){
 
               //stop this heartbeat timer
               heartbeatTimer.cancel();
 
               //update current term to the higher term
-              mConfig.setCurrentTerm(followerTerm);
+              mConfig.setCurrentTerm(followerTerm, 0);
 
               //leader convert into follower, this term ends, start new election
               RaftServerImpl.setMode(new FollowerMode());
