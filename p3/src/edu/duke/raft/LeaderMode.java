@@ -49,12 +49,7 @@ public class LeaderMode extends RaftMode {
             //matchindex: for each server index of highest log entry known to be replicated on server
             
             //send initial empty AppendEntries RPCs to each server
-            for (int server_id = 0; server_id < mConfig.getNumServers(); server_id++){
-                //Don't send it to the leader/self
-                if (server_id != mID){
-                    remoteAppendEntries(server_id + 1, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), mLog.getLastTerm(), new Entry[0], mCommitIndex);
-                }
-            }
+            sendAppendEntriesRPC();
             
             
         }
@@ -73,6 +68,33 @@ public class LeaderMode extends RaftMode {
             heartbeatTimerID = mID * 7;
             
             return super.scheduleTimer(heartbeatTimeout, heartbeatTimerID);
+        }
+    }
+    
+    /*
+     * send append entries RPC to followers after each timeout
+     * If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
+     * otherwise send empty entry
+     */
+
+    public void sendAppendEntriesRPC(){
+        //for each follower
+        for (int server_id = 1; server_id < mConfig.getNumServers() + 1; server_id++){
+            if (server_id != mID){
+                
+                if (mLog.getLastIndex() < nextIndex[server_id]){
+                    //send empty append entries RPC
+                    remoteAppendEntries(server_id, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), mLog.getLastTerm(), new Entry[0], mCommitIndex);
+                }else{
+                    //send log entries starting at nextIndex
+                    Entry[] logEntries = new Entry[mLog.getLastIndex() - nextIndex[server_id] + 1]
+                    for (int i = 0; i < logEntries.length; i++){
+                        logEntries[i] = mLog.getEntry(i + nextIndex[server_id]);
+                    }
+                    remoteAppendEntries(server_id, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), mLog.getLastTerm(), logEntries, mCommitIndex);
+                }
+            
+            }
         }
     }
     
@@ -159,6 +181,7 @@ public class LeaderMode extends RaftMode {
                 
                 
                 //send appendRPC periodicaly here
+                sendAppendEntriesRPC();
                 
                 //start new heartbeatTimer
                 heartbeatTimer = startHeartBeatTimer();
