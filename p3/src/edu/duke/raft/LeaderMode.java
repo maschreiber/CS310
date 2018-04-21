@@ -16,6 +16,8 @@ public class LeaderMode extends RaftMode {
     private Timer heartbeatTimer;
     private int heartbeatTimeout;
     private int heartbeatTimerID;
+    private int[] nextIndex;
+    private int[] matchIndex;
     
     
     public void go () {
@@ -31,8 +33,28 @@ public class LeaderMode extends RaftMode {
             //set heartbeat timer
             heartbeatTimer = startHeartBeatTimer();
             
-            //start new raft responses under new term
-            //set term done in candidate
+            int numServer = mConfig.getNumServers();
+            
+            
+            
+            nextIndex = new int[numServer + 1];
+            matchIndex = new int[numServer + 1];
+            for (int server_id = 1; server_id < numServer + 1; server_id++){
+                //initialize nextIndex to leader last log index + 1
+                nextIndex[server_id] = mLog.getLastIndex() + 1;
+                //initialize matchIndex to 0
+                matchIndex[server_id] = 0;
+            }
+            //nextindex: for each server, index of the next log entry to send to that server
+            //matchindex: for each server index of highest log entry known to be replicated on server
+            
+            //send initial empty AppendEntries RPCs to each server
+            for (int server_id = 0; server_id < mConfig.getNumServers(); server_id++){
+                //Don't send it to the leader/self
+                if (server_id != mID){
+                    remoteAppendEntries(server_id + 1, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), mLog.getLastTerm(), new Entry[0], mCommitIndex);
+                }
+            }
             
             
         }
@@ -136,14 +158,7 @@ public class LeaderMode extends RaftMode {
                 }
                 
                 
-                //send requestAppendEntries empy to all followers
-                for (int server_id = 0; server_id < mConfig.getNumServers(); server_id++){
-                    
-                    //Don't send it to the leader
-                    if (server_id != mID){
-                        remoteAppendEntries(server_id + 1, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), mLog.getLastTerm(), new Entry[0], mCommitIndex);
-                    }
-                }
+                //send appendRPC periodicaly here
                 
                 //start new heartbeatTimer
                 heartbeatTimer = startHeartBeatTimer();
