@@ -23,6 +23,7 @@ public class LeaderMode extends RaftMode {
 	public void go () {
 		synchronized (mLock) {
 			int term = mConfig.getCurrentTerm();
+			RaftResponses.setTerm(term);
 			RaftResponses.clearAppendResponses(mConfig.getCurrentTerm());
 
 			System.out.println ("S" +
@@ -210,11 +211,13 @@ public class LeaderMode extends RaftMode {
 	
 	public void appendEntriesResponse() {
 		
-		//if maxFollowerTerm is larger than current in the end, revert to follower
-		int maxFollowerTerm = mConfig.getCurrentTerm();
+		
 		
 		//array of AppendEntries RPC responses  
 		int[] followerResponses = RaftResponses.getAppendResponses(mConfig.getCurrentTerm());
+		
+		//if maxFollowerTerm is larger than current in the end, revert to follower
+		int maxFollowerTerm = mConfig.getCurrentTerm();
 		
 		//for each follower response
 		for (int i = 1; i < followerResponses.length; i++) {
