@@ -23,6 +23,7 @@ public class LeaderMode extends RaftMode {
 	public void go () {
 		synchronized (mLock) {
 			int term = mConfig.getCurrentTerm();
+			RaftResponses.clearAppendResponses(mConfig.getCurrentTerm());
 
 			System.out.println ("S" +
 					mID +
@@ -39,7 +40,7 @@ public class LeaderMode extends RaftMode {
 
 			nextIndex = new int[numServer + 1];
 			matchIndex = new int[numServer + 1];
-			for (int server_id = 1; server_id < numServer + 1; server_id++){
+			for (int server_id = 1; server_id < numServer +1; server_id++){
 				//initialize nextIndex to leader last log index + 1
 				nextIndex[server_id] = mLog.getLastIndex() + 1;
 				//initialize matchIndex to 0
@@ -76,7 +77,6 @@ public class LeaderMode extends RaftMode {
 	 * If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
 	 * otherwise send empty entry
 	 */
-
 	public void sendAppendEntriesRPC(){
 		// CHECK if conditions
 		synchronized (mLock) {
@@ -186,45 +186,71 @@ public class LeaderMode extends RaftMode {
 	public void handleTimeout (int timerID) {
 		synchronized (mLock) {
 			/*heartbeat timer timed out:
-			 * send requestAppendEntries empty to all followers
-			 * start new heartbeatTimer
+			 * 1) check responses from each timer cycle, update nextIndex, if should revert to follower etc
+			 * 2) start new heartbeatTimer
+			 * 3) Send new appendRPC = heartbeat + append Log
 			 */
 			if (timerID == heartbeatTimerID) {
-
-				//check if the append entries rpc reponse has a term higher than leader
-				int[] appendResponses = RaftResponses.getAppendResponses(mConfig.getCurrentTerm());
-				for (int i = 1; i < appendResponses.length +1; i++){
-					//if response is 0, server appended entries
-					//otherwise, server's curent term, append RPC failed
-					if (appendResponses[i] <= 0){
-						break;
-					}
-					if (appendResponses[i] > 0){
-						int followerTerm = appendResponses[i];
-						//if follwer term is larger than current term/leader term
-						if (followerTerm > mConfig.getCurrentTerm()){
-
-							//stop this heartbeat timer
-							heartbeatTimer.cancel();
-
-							//update current term to the higher term
-							mConfig.setCurrentTerm(followerTerm, 0);
-
-							//leader convert into follower, this term ends, start new election
-							RaftServerImpl.setMode(new FollowerMode());
-							return;
-						}
-					}
-				}
-
-
-				//send appendRPC periodicaly here
+				//check this cycle's AppendEntries RPC responses
+				appendEntriesResponse();
+				
+				//send new AppendEntries RPC
 				sendAppendEntriesRPC();
-
-				//start new heartbeatTimer
-				heartbeatTimer = startHeartBeatTimer();
-
+				
 			}
 		}
 	}
+	
+	/*
+	 * after sending AppendEntries RPC with log entries starting at nextIndex:
+	 * Responses stored in RaftResponses.getAppendResponses(mConfig.getCurrentTerm())
+	 * If successful -> 0: update nextIndex (next log entry index) and matchIndex (highest log entry) for follower
+	 * If fails ->  because of log inconsistency: decrement nextIndex and retry
+	 */
+	
+	public void appendEntriesResponse() {
+		
+		//if maxFollowerTerm is larger than current in the end, revert to follower
+		int maxFollowerTerm = mConfig.getCurrentTerm();
+		
+		//array of AppendEntries RPC responses  
+		int[] followerResponses = RaftResponses.getAppendResponses(mConfig.getCurrentTerm());
+		
+		//for each follower response
+		for (int i = 1; i < followerResponses.length; i++) {
+			//if follower responses term is larger than the max term
+			if (followerResponses[i] > maxFollowerTerm) {
+				maxFollowerTerm = followerResponses[i];
+			}
+			//if successful update nextIndex
+			//if fails decrement nextIndex and retry
+			if (followerResponses[i] != 0) {
+				nextIndex[i] -= 1; //this will be checked/retried in method sendAppendEntriesRPC()
+			}
+	
+		}
+		
+		//if there exists a follower with higher term than current term, leader revert to follower
+		if (maxFollowerTerm > mConfig.getCurrentTerm()) {
+			heartbeatTimer.cancel();
+			mConfig.setCurrentTerm(maxFollowerTerm, 0);
+			RaftServerImpl.setMode(new FollowerMode());
+		}else {
+			//if leader stays as leader, initiate new cycle
+			heartbeatTimer.cancel();
+			heartbeatTimer = scheduleTimer(heartbeatTimeout, heartbeatTimerID);
+			RaftResponses.clearAppendResponses(mConfig.getCurrentTerm());	
+		}
+		
+	}
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 }
