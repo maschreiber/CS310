@@ -4,166 +4,197 @@ import java.util.Timer;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class CandidateMode extends RaftMode {
-	
-	private Timer timer;
-	private int timeout;
-	private int timerID;
-	
-	public void go() {
-		synchronized (mLock) {
-			// When a server first becomes a candidate, it increments its term.
-			int term = mConfig.getCurrentTerm();
-			term++;
-			mConfig.setCurrentTerm(term, mID);
 
-			System.out.println ("S" +
-					mID +
-					"." +
-					term +
-					": switched to candidate mode.");
-			
-			//Set timer that periodically checks if majority has voted for this candidate
-			timer = startTimer();
-			
-			RaftResponses.setTerm(term);
-			RaftResponses.clearVotes(term);
+    private Timer voteTimer;
+    private Timer electionTimer;
+    private boolean firstTimeCandidate = true;
+    
+    private void startTimer () {
+        if (voteTimer != null)
+            voteTimer.cancel();
+        if (electionTimer != null)
+            electionTimer.cancel();
 
-			// Sends request votes RPC to all other servers in parallel
-			for (int server_id = 0; server_id < mConfig.getNumServers(); server_id++){
-				remoteRequestVote(server_id + 1, term, mID, mLog.getLastIndex(), mLog.getLastTerm());
-			}
+        voteTimer = super.scheduleTimer(25, 0);
 
-		}
-	}
-	
-	private Timer startTimer() {
-		synchronized (mLock) {
-			if (timer != null)
-				timer.cancel();
-			// Timeouts (one random, one user set)
-			int randomTime = ThreadLocalRandom.current().nextInt(ELECTION_TIMEOUT_MIN, ELECTION_TIMEOUT_MAX);
-			int overrideTime = mConfig.getTimeoutOverride();
+        // Timeouts (one random, one user set)
+        int randomTime = ThreadLocalRandom.current().nextInt(ELECTION_TIMEOUT_MIN, ELECTION_TIMEOUT_MAX + 1);
+        int overrideTime = mConfig.getTimeoutOverride();
 
-			// Prioritize validly set user timeouts over randomized timeout.
-			timeout = (overrideTime <= 0) ? randomTime : overrideTime;
-			timerID = mID;
+        // Prioritize validly set user timeouts over randomized timeout.
+        int timeout = (overrideTime <= 0) ? randomTime : overrideTime;
+        electionTimer = super.scheduleTimer(timeout, 1);
+    }
+    
+    public void go () {
+        synchronized (mLock) {
+            // When a server first becomes a candidate, it increments its term.
+            int term = mConfig.getCurrentTerm();
+            term++;
 
-			return super.scheduleTimer(timeout, timerID);
-		}
-	}
+            if (firstTimeCandidate) {
+                System.out.println ("S" +
+                    mID +
+                    "." +
+                    term +
+                    ": switched to candidate mode.");
+            }
 
-	/**
-	 * Handles another server (perhaps itself) requesting a vote where this candidate is a candidate.
-	 * Grants vote if not yet voted, the candidate log is at least as up-to-date, and
-	 * the candidate term matches or exceeds. Denies vote if conditions are not met.
-	 * 
-	 * @param candidateTerm the current term of the candidate
-	 * @param candidateID server ID of the candidate
-	 * @param candidateLastLogIndex index of the candidate's last log entry
-	 * @param candidateLastLogTerm term of the candidate's last log entry
-	 * 
-	 * @return 0 if vote granted, server's current term if vote denied
-	 */
-	public int requestVote (int candidateTerm, int candidateID, int candidateLastLogIndex, int candidateLastLogTerm) {
-		synchronized (mLock) {
-			int term = mConfig.getCurrentTerm ();
-			
-			// Vote for itself
-			if (candidateID == mID)
-				return 0;
-			
-			// According to Piazza @854, you only vote for the other candidate if their term is strictly greater.
-			// If the candidate has a lower or equal term, do not vote for them.
-			if (term >= candidateTerm)
-				return term;
-			
-			startTimer();
-			
-			int lastLogTerm = mLog.getLastTerm();
-			int lastLogIndex = mLog.getLastIndex();
-			
-			boolean qualified_candidate = false;
-			if (lastLogTerm < candidateLastLogTerm) {
-				qualified_candidate = true;
-			} else if (lastLogTerm == candidateLastLogTerm && lastLogIndex <= candidateLastLogIndex) {
-				qualified_candidate = true;
-			}
-			
-			FollowerMode follower = new FollowerMode();
-			
-			if (!qualified_candidate) {
-				mConfig.setCurrentTerm(candidateTerm, 0);
-				RaftServerImpl.setMode(follower);
-				return candidateTerm;
-			}
-			
-			mConfig.setCurrentTerm(candidateTerm, candidateID);
-			RaftServerImpl.setMode(follower);
-			return 0;
-		}
-	}
+            // We set that incremented term, and also "vote" for ourselves in the process.
+            mConfig.setCurrentTerm(term, mID);
+            startTimer();
+            startElection();
+        }
+    }
+    
+    private void startElection() {
+        int term = mConfig.getCurrentTerm();
 
+        RaftResponses.setTerm(term);
+        RaftResponses.clearVotes(term);
+            
+        int serverID = 0;
+        while (serverID != mConfig.getNumServers()) {                
+            remoteRequestVote(serverID+1, term, mID, mLog.getLastIndex(), mLog.getLastTerm());
+            serverID++;
+        }
+    }
 
-	/**
-	 * Append entries to local log. Step down to follower if higher term leader presents itself.
-	 * 
-	 * @param leaaderTerm the current term of the leader
-	 * @param leaedrID server ID of the leader
-	 * @param leaderPrevLogIndex index of the log entry before entries to append
-	 * @param leaderPrevLogTerm term of log entry before entries to append
-	 * @param entries to append
-	 * 
-	 * @return 0 if successful append or step down, server current term if append denied, -1 if log corrupted
-	 */
-	public int appendEntries (int leaderTerm, int leaderID, int leaderPrevLogIndex,
-			int leaderPrevLogTerm, Entry[] entries, int leaderCommit) {
-		synchronized (mLock) {
-			int term = mConfig.getCurrentTerm ();
+    // @param candidate’s term
+    // @param candidate requesting vote
+    // @param index of candidate’s last log entry
+    // @param term of candidate’s last log entry
+    // @return 0, if server votes for candidate; otherwise, server's current term
+    public int requestVote (int candidateTerm, 
+                            int candidateID, 
+                            int candidateLastLogIndex, 
+                            int candidateLastLogTerm) {
+        synchronized (mLock) {
+            int term = mConfig.getCurrentTerm();
 
-			// Will not accept entries to append from a leader with a lower term.
-			if (leaderTerm < term)
-				return term;
-			
-			// Step down if leader's term exceeds or matches.
-			mConfig.setCurrentTerm(leaderTerm, leaderID);
-			timer.cancel();
-			RaftServerImpl.setMode(new FollowerMode());
-			return 0;
-		}
-	}
+            // Vote for itself
+            if (mID == candidateID)
+                return 0;
 
+            // According to Piazza @854, you only vote for the other candidate if their term is strictly greater.
+            // If our term is at least as large as the candidate's, do not cast your vote for them.
+            if (term >= candidateTerm)
+                return term;
 
-	// If any of the votes return their term, we know we are unqualified to be leader and should step down.
-	
-	public void handleTimeout (int timerID) {
-		synchronized (mLock) {
-			if (timerID == mID) {
-				int term = mConfig.getCurrentTerm();
-				int [] votes = RaftResponses.getVotes(term);
-				
-				int votesForMe = 0;
-				int max_term = Integer.MIN_VALUE;
-				for (int vote : votes) {
-					if  (vote > term) {
-						max_term = Math.max(max_term, vote);
-					} else if (vote == 0) {
-						votesForMe++;
-					}
-				}
-				if (max_term > term) {
-					mConfig.setCurrentTerm(max_term, 0);
-					timer.cancel();
-					RaftServerImpl.setMode(new FollowerMode());
-					return;
-				}
-				if (votesForMe * 2 > mConfig.getNumServers()) {
-					timer.cancel();
-					RaftServerImpl.setMode(new LeaderMode());
-				} else {
-					timer.cancel();
-					this.go();
-				}
-			}
-		}
-	}
+            // We can cancel timer permanently, because we will end up transitioning this server to follower mode.
+            voteTimer.cancel();
+            electionTimer.cancel();
+
+            int lastLogIndex = mLog.getLastIndex();
+            int lastLogTerm = mLog.getLastTerm();
+
+            boolean logUpdated;
+            if (candidateLastLogTerm > lastLogTerm)
+                logUpdated = true;
+            else if ((candidateLastLogTerm == lastLogTerm) && (candidateLastLogIndex >= lastLogIndex))
+                logUpdated = true;
+            else
+                logUpdated = false;
+
+            FollowerMode follower = new FollowerMode();
+            if (!logUpdated) {
+                mConfig.setCurrentTerm(candidateTerm, 0);
+                RaftServerImpl.setMode(follower);
+                return candidateTerm;
+            }
+            mConfig.setCurrentTerm(candidateTerm, candidateID);
+            RaftServerImpl.setMode(follower);
+            return 0;
+        }
+    }
+    
+    
+    // @param leader’s term
+    // @param current leader
+    // @param index of log entry before entries to append
+    // @param term of log entry before entries to append
+    // @param entries to append (in order of 0 to append.length-1)
+    // @param index of highest committed entry
+    // @return 0, if server appended entries; otherwise, server's current term
+    public int appendEntries (int leaderTerm, 
+                              int leaderID, 
+                              int leaderPrevLogIndex, 
+                              int leaderPrevLogTerm, 
+                              Entry[] entries, 
+                              int leaderCommit) {
+        synchronized (mLock) {
+            int term = mConfig.getCurrentTerm();
+
+            // Will not accept entries to append from a leader with a lower term.
+            if (leaderTerm < term)
+                return term;
+            
+    
+            mConfig.setCurrentTerm(leaderTerm, leaderID);
+            voteTimer.cancel();
+            electionTimer.cancel();
+                
+            FollowerMode follower = new FollowerMode();
+            RaftServerImpl.setMode(follower);
+            return leaderTerm;
+        }
+    }
+    
+    // @param id of the timer that timed out
+    public void handleTimeout (int timerID) {
+        synchronized (mLock) {            
+            if (timerID == 0) {
+                handleVotingTimeout();
+            }
+            else if (timerID == 1) {
+                handleElectionTimeout();
+            }
+        }
+    }
+
+    private void handleVotingTimeout() {
+        int term = mConfig.getCurrentTerm();
+        int[] votes = RaftResponses.getVotes(term);
+        int votesForMe = 0;
+        int max_term = Integer.MIN_VALUE;
+
+        for (int vote : votes) {
+            if (vote > term) {
+                max_term = Math.max(max_term, vote);
+            } else if (vote == 0) {
+                votesForMe++;
+            }
+        }
+        int index = 0;
+        if (max_term > term) {
+            for (int i = 1; i < votes.length; i++) {
+                if (votes[i] == max_term) {
+                    index = i;
+                    break;
+                }
+            }
+            voteTimer.cancel();
+            electionTimer.cancel();
+            mConfig.setCurrentTerm(max_term, index);
+            RaftServerImpl.setMode(new FollowerMode());
+            return;
+        }
+        if (mConfig.getNumServers() >= votesForMe*2) {
+            voteTimer.cancel();
+            voteTimer = super.scheduleTimer(25, 0);
+        }
+        else {
+            voteTimer.cancel();
+            electionTimer.cancel();
+            RaftServerImpl.setMode(new LeaderMode());
+            return;
+        }
+    }
+
+    private void handleElectionTimeout() {
+        voteTimer.cancel();
+        electionTimer.cancel();
+        firstTimeCandidate = false;
+        this.go();
+    }
 }
