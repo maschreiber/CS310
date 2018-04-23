@@ -27,6 +27,7 @@ public class FollowerMode extends RaftMode {
                     "." +
                     term +
                     ": switched to follower mode.");
+
             //System.out.println("Server " + mID + " is in term " + term + " and the log is " + mLog);
             startTimer();
         }
@@ -63,7 +64,9 @@ public class FollowerMode extends RaftMode {
             //System.out.println("This is follower " + mID + "with a term of " + mConfig.getCurrentTerm() + " amd lastLogTerm = " + lastLogTerm + 
               //  " candidatelastlogterm = " + candidateLastLogTerm + "logUpdated" + logUpdated);
 
-;            // If the candidate's term is strictly greater, we grant vote as long as log is updated.
+            // If the candidate's term is strictly greater, we grant vote as long as log is updated.
+
+            // If the candidate's term is strictly greater, we grant vote as long as log is updated.
             if (logUpdated) {
                 if (term < candidateTerm) {
                     mConfig.setCurrentTerm(candidateTerm, candidateID);
@@ -172,6 +175,7 @@ public class FollowerMode extends RaftMode {
                 return term;
             }
             //System.out.println("Server " + mID + " recently updated log to be " + mLog);
+
             // From RAFT paper    
             if (leaderCommit > mCommitIndex) {
                 mCommitIndex = Math.min(leaderCommit, mLog.getLastIndex());
@@ -191,7 +195,3 @@ public class FollowerMode extends RaftMode {
         }
     }
 }
-
-
-
-
