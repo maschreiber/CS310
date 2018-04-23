@@ -2,136 +2,196 @@ package edu.duke.raft;
 
 import java.util.Timer;
 import java.util.concurrent.ThreadLocalRandom;
-
+import java.util.Arrays;
 public class FollowerMode extends RaftMode {
 
-	private Timer timer;
-	private int timeout;
-	private int timerID;
+    private Timer heartbeatTimer;
+    
+    private void startTimer() {
+        if (heartbeatTimer != null)
+            heartbeatTimer.cancel();
+        // Timeouts (one random, one user set)
+        int randomTime = ThreadLocalRandom.current().nextInt(ELECTION_TIMEOUT_MIN, ELECTION_TIMEOUT_MAX + 1);
+        int overrideTime = mConfig.getTimeoutOverride();
 
-	public void go () {
-		synchronized (mLock) {
-			int term = mConfig.getCurrentTerm();
-			System.out.println ("S" +
-					mID +
-					"." +
-					term +
-					": switched to follower mode.");
-			timer = startTimer();
-		}
-	}
+        // Prioritize validly set user timeouts over randomized timeout.
+        int timeout = (overrideTime <= 0) ? randomTime : overrideTime;
+        heartbeatTimer = super.scheduleTimer(timeout, 0);
+    }
+    
+    public void go () {
+        synchronized (mLock) {
+            int term = mConfig.getCurrentTerm();
+            System.out.println ("S" +
+                    mID +
+                    "." +
+                    term +
+                    ": switched to follower mode.");
+            //System.out.println("Server " + mID + " is in term " + term + " and the log is " + mLog);
+            startTimer();
+        }
+    }
+    
+    // @param candidate’s term
+    // @param candidate requesting vote
+    // @param index of candidate’s last log entry
+    // @param term of candidate’s last log entry
+    // @return 0, if server votes for candidate; otherwise, server's current term
+    public int requestVote (int candidateTerm, 
+                            int candidateID, 
+                            int candidateLastLogIndex, 
+                            int candidateLastLogTerm) {
+        synchronized (mLock) {
+            int term = mConfig.getCurrentTerm();
+            int lastLogTerm = mLog.getLastTerm();
+            int lastLogIndex = mLog.getLastIndex();
+            int votedFor = mConfig.getVotedFor();
 
-	private Timer startTimer() {
-		synchronized (mLock) {
-			if (timer != null)
-				timer.cancel();
-			// Timeouts (one random, one user set)
-			int randomTime = ThreadLocalRandom.current().nextInt(ELECTION_TIMEOUT_MIN, ELECTION_TIMEOUT_MAX);
-			int overrideTime = mConfig.getTimeoutOverride();
+            if (term > candidateTerm)
+                return term;
 
-			// Prioritize validly set user timeouts over randomized timeout.
-			timeout = (overrideTime <= 0) ? randomTime : overrideTime;
-			timerID = mID;
+            boolean logUpdated;
+            if (candidateLastLogTerm > lastLogTerm)
+                logUpdated = true;
+            else if ((candidateLastLogTerm == lastLogTerm) && (candidateLastLogIndex >= lastLogIndex))
+                logUpdated = true;
+            else
+                logUpdated = false;
 
-			return super.scheduleTimer(timeout, timerID);
-		}
-	}
+            boolean voteCasted = (votedFor != 0 && votedFor != candidateID);
 
-	/**
-	 * Grants vote if not yet voted, the candidate log is at least as up-to-date, and
-	 * the candidate term matches or exceeds. Denies vote if conditions are not met.
-	 * 
-	 * @param candidateTerm the current term of the candidate
-	 * @param candidateID server ID of the candidate
-	 * @param candidateLastLogIndex index of the candidate's last log entry
-	 * @param candidateLastLogTerm term of the candidate's last log entry
-	 * 
-	 * @return 0 if vote granted, server's current term if vote denied
-	 */
-	public int requestVote (int candidateTerm, int candidateID, int candidateLastLogIndex, int candidateLastLogTerm) {
-		synchronized (mLock) {
-			int term = mConfig.getCurrentTerm ();
-			int lastLogTerm = mLog.getLastTerm();
-			int votedFor = mConfig.getVotedFor();
+            //System.out.println("This is follower " + mID + "with a term of " + mConfig.getCurrentTerm() + " amd lastLogTerm = " + lastLogTerm + 
+              //  " candidatelastlogterm = " + candidateLastLogTerm + "logUpdated" + logUpdated);
 
-			// If this server has already voted for another candidate, deny vote.
-			if (votedFor != 0 && votedFor != candidateID)
-				return term;
+;            // If the candidate's term is strictly greater, we grant vote as long as log is updated.
+            if (logUpdated) {
+                if (term < candidateTerm) {
+                    mConfig.setCurrentTerm(candidateTerm, candidateID);
+                    startTimer();
+                    return 0;
+                } else if ((term == candidateTerm) && (!voteCasted)) {
+                    // We also vote for the candidate, since we have a vote to give.
+                    startTimer();
+                    return 0;
+                } else {
+                    // The follower already casted vote to another candidate, so we deny vote.
+                    return term;
+                }
+            } else {
+                if (term < candidateTerm) {
+                    //System.out.println("Hi from follower " + mID);
+                    mConfig.setCurrentTerm(candidateTerm, 0);;
+                    //startTimer();
+                    return term;
+                } else if ((term == candidateTerm) && (!voteCasted)) {
+                    return term;
+                } else {
+                    return term;
+                }
+            }
+        }
+    }
+    
+    // @param leader’s term
+    // @param current leader
+    // @param index of log entry before entries to append
+    // @param term of log entry before entries to append
+    // @param entries to append (in order of 0 to append.length-1)
+    // @param index of highest committed entry
+    // @return 0, if server appended entries; otherwise, server's current term
+    public int appendEntries (int leaderTerm, 
+                              int leaderID, 
+                              int leaderPrevLogIndex, 
+                              int leaderPrevLogTerm, 
+                              Entry[] entries, 
+                              int leaderCommit) {
+        synchronized (mLock) {
+            int term = mConfig.getCurrentTerm();
 
-			// This server shouldn't have a higher term than the candidate.
-			if (term > candidateTerm)
-				return term;
+            /*System.out.println("Server " + 
+                mID + 
+                " is in term " + 
+                term + 
+                ". We have received an AppendRPC, with leader = " + 
+                leaderID + 
+                ", leaderTerm = " + 
+                leaderTerm + 
+                ", leaderPrevLogIndex = " + 
+                leaderPrevLogIndex + 
+                ", leaderPrevLogTerm = " +
+                leaderPrevLogTerm + 
+                ", entries = " + 
+                Arrays.toString(entries) + 
+                ", and leaderCommit = " + 
+                leaderCommit);*/
+            
 
-			// This server's term of the last log entry is higher than the candidate's last log entry.
-			if (lastLogTerm > candidateLastLogTerm) {
-				mConfig.setCurrentTerm(candidateTerm, 0);
-				return term;
-			}
-			
-			mConfig.setCurrentTerm(candidateTerm, candidateID);
-			timer = startTimer();
-			return 0;
-		}
-	}
+            if (leaderTerm < term)
+                return term;
+            //System.out.println("Checkpoint A " + mID);
+            // We update the current term to the leader's term since it is larger or equal to ours.
+            mConfig.setCurrentTerm(leaderTerm, 0);
+            //System.out.println("Checkpoint B "+ mID);
+            // Recognize that the leader is valid, so we hold its heartbeat valid.
+            startTimer();
 
-	/**
-	 * Append entries to local log.
-	 * 
-	 * @param leaaderTerm the current term of the leader
-	 * @param leaedrID server ID of the leader
-	 * @param leaderPrevLogIndex index of the log entry before entries to append
-	 * @param leaderPrevLogTerm term of log entry before entries to append
-	 * @param entries to append
-	 * 
-	 * @return 0 if successful append, server current term if append denied, -1 if log corrupted
-	 */
-	public int appendEntries (int leaderTerm, int leaderID, int leaderPrevLogIndex, 
-			int leaderPrevLogTerm, Entry[] entries, int leaderCommit) {
-		synchronized (mLock) {
-			int term = mConfig.getCurrentTerm ();
-			
-			// Will not accept entries to append from a leader with a lower term.
-			if (leaderTerm < term)
-				return term;
-			
-			mConfig.setCurrentTerm(leaderTerm, 0);
-			
-			timer = startTimer();
-			Entry entry;
-			try {
-				entry = mLog.getEntry(leaderPrevLogIndex);
-				if (entry == null)
-					return term;
-				else if (entry.term != leaderPrevLogTerm)
-					return term;
-			} catch (IndexOutOfBoundsException e) {
-				return term;
-			}
-			
-			int insertCode = mLog.insert(entries, leaderPrevLogIndex, leaderPrevLogTerm);
-			if (insertCode == -1)
-				return term;
-			
-			if (leaderCommit > mCommitIndex)
-				mCommitIndex = Math.min(leaderCommit, insertCode);
-			
-			return 0;
-		}
-	}
+             if (entries.length == 0) {
+                //System.out.println("this is a heartbeat!!");
+                return 0;
+             }
+            
+            // Error handling.
 
-	/**
-	 * If timer finishes, promote self to candidate.
-	 * 
-	 * @param timerID recognizes the timer associated with this mode (follower) and this server
-	 */
-	public void handleTimeout (int timerID) {
-		synchronized (mLock) {
-			// Switch to candidate mode if timer has timed out.
-			CandidateMode candidate = new CandidateMode();
-			if (timerID == mID) {
-				timer.cancel();
-				RaftServerImpl.setMode(candidate);
-			}
-		}
-	}
+            //heartbeat
+            //if (entries.length == 0)
+              //  return 0;
+
+            Entry entry;
+            try {
+                entry = mLog.getEntry(leaderPrevLogIndex);
+                //System.out.println("Server " + mID + " checks its local for leaderPrevLogIndex = " + leaderPrevLogIndex + 
+                    //" and finds the entry = " + entry);
+                //System.out.println("Checkpoint C " + mID + " " + entry);
+                if (entry == null) {
+                    //System.out.println("oops " + mID);
+                    return term;
+
+                }
+                else if (entry.term != leaderPrevLogTerm) {
+                    //System.out.println("shit " + mID);
+                    return term;
+                }
+            } catch (Exception e) {
+                //System.out.println(e);
+            }
+            
+            int insertIndex = leaderPrevLogIndex--;
+            int insertCode = mLog.insert(entries, insertIndex, leaderPrevLogTerm);
+            if (insertCode == -1) {
+                //System.out.println("This case should have been handled already. Strange." + mID);
+                return term;
+            }
+            //System.out.println("Server " + mID + " recently updated log to be " + mLog);
+            // From RAFT paper    
+            if (leaderCommit > mCommitIndex) {
+                mCommitIndex = Math.min(leaderCommit, mLog.getLastIndex());
+            }
+                
+            return 0;
+        }
+    }
+    
+// @param id of the timer that timed out
+    public void handleTimeout (int timerID) {
+        synchronized (mLock) {
+            if (timerID == 0) {
+                heartbeatTimer.cancel();
+                RaftServerImpl.setMode(new CandidateMode());
+            }
+        }
+    }
 }
+
+
+
+

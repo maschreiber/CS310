@@ -1,227 +1,210 @@
 package edu.duke.raft;
 
 import java.util.Timer;
-import java.util.concurrent.ThreadLocalRandom;
-
-/*
-* Leader's tasks:
-* 1) Send periodic heartbeat to prevent timeout
-* 2) command received from client: append entry to local log, respond after entry applied to state machine
-* 3) If last log index > nextIndex for a follower send AppendEntries RPC with log entries
-* 4) If response contains term T > currentTerm, set currentTerm = T, covert to follower
-*/
 
 public class LeaderMode extends RaftMode {
+    private Timer timer;
+    private int tID;
+    private int[] nextIndex;
+    private int[] matchIndex;
 
-  private Timer heartbeatTimer;
-  private int heartbeatTimeout;
-  private int heartbeatTimerID;
-  private int[] nextIndex;
-  private int[] matchIndex;
+    public void go () {
+        synchronized (mLock) {
+            int term = mConfig.getCurrentTerm();
+            int numServers = mConfig.getNumServers();
 
+            RaftResponses.setTerm(term);
+            RaftResponses.clearAppendResponses(term);
 
-  public void go () {
-    synchronized (mLock) {
-      int term = mConfig.getCurrentTerm();
+            tID = 11;
 
-      System.out.println ("S" +
-      mID +
-      "." +
-      term +
-      ": switched to leader mode.");
+            startTimer();
 
-      //set heartbeat timer
-      heartbeatTimer = startHeartBeatTimer();
+            System.out.println ("S" +
+                    mID +
+                    "." +
+                    term +
+                    ": switched to leader mode.");
 
-      int numServer = mConfig.getNumServers();
-
-
-
-      nextIndex = new int[numServer + 1];
-      matchIndex = new int[numServer + 1];
-      for (int server_id = 1; server_id < numServer + 1; server_id++){
-        //initialize nextIndex to leader last log index + 1
-        nextIndex[server_id] = mLog.getLastIndex() + 1;
-        //initialize matchIndex to 0
-        matchIndex[server_id] = 0;
-      }
-      //nextindex: for each server, index of the next log entry to send to that server
-      //matchindex: for each server index of highest log entry known to be replicated on server
-
-      //send initial empty AppendEntries RPCs to each server
-      sendAppendEntriesRPC();
-
-
-    }
-  }
-
-  private Timer startHeartBeatTimer() {
-    synchronized (mLock) {
-      if (heartbeatTimer != null)
-      heartbeatTimer.cancel();
-      // Timeouts (one heartbeat, one user set)
-      int heartbeatTime = HEARTBEAT_INTERVAL;
-      int overrideTime = mConfig.getTimeoutOverride();
-
-      // Prioritize validly set user timeouts over randomized timeout.
-      heartbeatTimeout = (overrideTime <= 0) ? heartbeatTime : overrideTime;
-      heartbeatTimerID = mID * 7;
-
-      return super.scheduleTimer(heartbeatTimeout, heartbeatTimerID);
-    }
-  }
-
-  /*
-  * send append entries RPC to followers after each timeout
-  * If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
-  * otherwise send empty entry
-  */
-
-  public void sendAppendEntriesRPC(){
-    //for each follower
-    for (int server_id = 1; server_id < mConfig.getNumServers() + 1; server_id++){
-      if (server_id != mID){
-
-        if (mLog.getLastIndex() < nextIndex[server_id]){
-          //send empty append entries RPC
-          remoteAppendEntries(server_id, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), mLog.getLastTerm(), new Entry[0], mCommitIndex);
-        }else{
-          //send log entries starting at nextIndex
-          Entry[] logEntries = new Entry[mLog.getLastIndex() - nextIndex[server_id] + 1]
-          for (int i = 0; i < logEntries.length; i++){
-            logEntries[i] = mLog.getEntry(i + nextIndex[server_id]);
-          }
-          remoteAppendEntries(server_id, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), mLog.getLastTerm(), logEntries, mCommitIndex);
-        }
-
-      }
-    }
-  }
-
-
-
-  // @param candidate’s term
-  // @param candidate requesting vote
-  // @param index of candidate’s last log entry
-  // @param term of candidate’s last log entry
-  // @return 0, if server votes for candidate; otherwise, server's
-  // current term
-  public int requestVote (int candidateTerm,
-  int candidateID,
-  int lastLogIndex,
-  int lastLogTerm) {
-    synchronized (mLock) {
-
-      if (candidateTerm > mConfig.getCurrentTerm ()){
-        //if candidate's term is larger than current
-
-        if (lastLogTerm >= mLog.getLastTerm() || (lastLogTerm == mLog.getLastTerm() && lastLogIndex >= mLog.getLastIndex()) ){
-          heartbeatTimer.cancel();
-          mConfig.setCurrentTerm(candidateTerm, candidateID);
-          RaftServerImpl.setMode(new FollowerMode());
-          return 0;
-        }else{
-          heartbeatTimer.cancel();
-          mConfig.setCurrentTerm(candidateTerm, mID);
-          RaftServerImpl.setMode(new FollowerMode());
-          return mConfig.getCurrentTerm ();
-        }
-
-      }
-
-      return mConfig.getCurrentTerm ();
-    }
-  }
-
-
-  // @param leader’s term
-  // @param current leader
-  // @param index of log entry before entries to append
-  // @param term of log entry before entries to append
-  // @param entries to append (in order of 0 to append.length-1)
-  // @param index of highest committed entry
-  // @return 0, if server appended entries; otherwise, server's
-  // current term
-  public int appendEntries (int leaderTerm,
-  int leaderID,
-  int prevLogIndex,
-  int prevLogTerm,
-  Entry[] entries,
-  int leaderCommit) {
-    synchronized (mLock) {
-      if (leaderID == mID){
-        return -1;
-      }
-
-      else if (leaderTerm < mConfig.getCurrentTerm()){
-        return mConfig.getCurrentTerm();
-      }
-
-      else if (leaderTerm > mConfig.getCurrentTerm()){
-        heartbeatTimer.cancel();
-        //revert to follower
-        RaftServerImpl.setMode(new FollowerMode());
-        mConfig.setCurrentTerm(candidateTerm, leaderID);
-      }
-
-      else if (leaderTerm == mConfig.getCurrentTerm()){
-        if (prevLogTerm >= mLog.getLastTerm()){
-          heartbeatTimer.cancel();
-          RaftServerImpl.setMode(new FollowerMode());
-          return -1;
-        }
-
-    }
-    return -1;
-  }
-
-  /*
-  * send heartbeat messages if timeout
-  *
-  *  @param id of the timer that timed out
-  */
-  public void handleTimeout (int timerID) {
-    synchronized (mLock) {
-      /*heartbeat timer timed out:
-      * send requestAppendEntries empty to all followers
-      * start new heartbeatTimer
-      */
-      if (timerID == heartbeatTimerID) {
-
-        //check if the append entries rpc reponse has a term higher than leader
-        int[] appendResponses = RaftResponse.getAppendResponses(mConfig.getCurrentTerm());
-        for (int i = 1; i < appendResponses +1; i++){
-          //if response is 0, server appended entries
-          //otherwise, server's curent term, append RPC failed
-          if (appendResponses[i] <= 0){
-            break;
-          }
-          if (appendResponses[i] > 0){
-            int followerTerm = appendResponses[i];
-            //if follwer term is larger than current term/leader term
-            if (followerTerm > mConfig.currentTerm()){
-
-              //stop this heartbeat timer
-              heartbeatTimer.cancel();
-
-              //update current term to the higher term
-              mConfig.setCurrentTerm(followerTerm);
-
-              //leader convert into follower, this term ends, start new election
-              RaftServerImpl.setMode(new FollowerMode());
-              return;
+            nextIndex = new int[numServers + 1];
+            matchIndex = new int[numServers + 1];
+            for(int serverID = 0; serverID < numServers; serverID++){
+                nextIndex[serverID + 1] = mLog.getLastIndex() ;
+                matchIndex[serverID + 1] = 0;
             }
-          }
+            //System.out.println("When leader server " + mID + " is initialized it has last log index of " + mLog.getLastIndex() + 
+              //  " and the entry there is ");
+            
+            //send empty heartbeat msgs
+            for (int i = 1; i < mConfig.getNumServers() + 1; i++) {
+                remoteAppendEntries(i, mConfig.getCurrentTerm(), mID, mLog.getLastIndex(), -1, new Entry[0], mCommitIndex);
+            }
+
         }
-
-
-        //send appendRPC periodicaly here
-        sendAppendEntriesRPC();
-
-        //start new heartbeatTimer
-        heartbeatTimer = startHeartBeatTimer();
-
-      }
     }
-  }
+
+    private void startTimer() {
+        if (timer != null)
+            timer.cancel();
+        timer = scheduleTimer(HEARTBEAT_INTERVAL, tID);
+    }
+
+   
+    public int requestVote (int candidateTerm,
+                            int candidateID,
+                            int candidateLastLogIndex,
+                            int candidateLastLogTerm) {
+        synchronized (mLock) {
+            int term = mConfig.getCurrentTerm();
+            
+            // The leader is dominant over the candidate. The candidate must have a strictly higher
+            // term to get the leader to step down.
+            if (term >= candidateTerm) {
+                return term;
+            }
+
+            timer.cancel();
+
+            int lastLogIndex = mLog.getLastIndex();
+            int lastLogTerm = mLog.getLastTerm();
+
+            boolean logUpdated;
+            if (candidateLastLogTerm > lastLogTerm)
+                logUpdated = true;
+            else if ((candidateLastLogTerm == lastLogTerm) && (candidateLastLogIndex >= lastLogIndex))
+                logUpdated = true;
+            else
+                logUpdated = false;
+
+            if (!logUpdated) {
+                mConfig.setCurrentTerm(candidateTerm, 0);
+                timer.cancel();
+                RaftServerImpl.setMode(new FollowerMode());
+                return candidateTerm;
+            }
+            mConfig.setCurrentTerm(candidateTerm, candidateID);
+            timer.cancel();
+            RaftServerImpl.setMode(new FollowerMode());
+            return 0;
+        }
+    }
+
+    public int appendEntries (int leaderTerm, int leaderID, int leaderPrevLogIndex,
+                              int leaderPrevLogTerm,
+                              Entry[] entries,
+                              int leaderCommit) {
+        synchronized (mLock) {
+            if (leaderID == mID)
+                return 0; // or return -1(UP IN THE AIR)
+
+            int term = mConfig.getCurrentTerm();
+
+            if (term > leaderTerm)
+                return term;
+
+            timer.cancel();
+            
+            // In the case where there is another leader with a great term, yield way.
+            if (term < leaderTerm) {
+                // update term, step down to be follower
+                mConfig.setCurrentTerm(leaderTerm, 0);
+                timer.cancel();
+                RaftServerImpl.setMode(new FollowerMode());
+                return 0; // or return -1 (UP IN THE AIR)
+            }
+            
+            int prevLogIndex = mLog.getLastIndex();
+            int prevLogTerm = mLog.getLastTerm();
+
+            // This means that this server and the other leader have equivalent terms.
+            // Which one steps down?
+            boolean logUpdated;
+            if (leaderPrevLogTerm > prevLogTerm)
+                logUpdated = true;
+            else if ((leaderPrevLogTerm == prevLogTerm) && (leaderPrevLogIndex >= prevLogIndex))
+                logUpdated = true;
+            else
+                logUpdated = false;
+
+
+            if (logUpdated) {
+                timer.cancel();
+                RaftServerImpl.setMode(new FollowerMode());
+                return 0;
+            } else {
+                return term;
+            }
+
+        }
+    }
+
+    /**
+     * @param timerID id of the timer that timed out
+     */
+    public void handleTimeout (int timerID) {
+        synchronized (mLock) {
+            /*heartbeat timer timed out:
+             * 1) check responses from each timer cycle, update nextIndex, if should revert to follower etc
+             * 2) start new heartbeatTimer
+             * 3) Send new appendRPC = heartbeat + append Log
+             */
+            if (timerID == tID) {
+                //check this cycle's AppendEntries RPC responses
+
+                //array of AppendEntries RPC responses  
+                int[] followerResponses = RaftResponses.getAppendResponses(mConfig.getCurrentTerm());
+                
+                //if maxFollowerTerm is larger than current in the end, revert to follower
+                int term = mConfig.getCurrentTerm();
+                int followerTerm = term;
+                
+                //for each follower response
+                for (int i = 1; i < followerResponses.length; i++) {
+                    //if follower responses term is larger than the max term
+                    if (followerResponses[i] > followerTerm) {
+                        followerTerm = followerResponses[i];
+                    }
+                    //if fails decrement nextIndex and retry
+                    if (followerResponses[i] > 0) {
+                        //System.out.println("OVERLOAD OVERLOAD!!! " + i + " response is " + followerResponses[i] + " and the nextIndex before decrement at 168 is " + nextIndex[i]);
+                        nextIndex[i] -= 1; //this will be checked/retried in method sendAppendEntriesRPC()
+                    }
+                }
+                
+                //if there exists a follower with higher term than current term, leader revert to follower
+                if (term >= followerTerm) {
+                    //if leader stays as leader, initiate new cycle
+                    RaftResponses.clearAppendResponses(mConfig.getCurrentTerm()); 
+                    startTimer();
+                    
+                    //send new AppendEntries RPC
+                    
+                    for (int i = 1; i < mConfig.getNumServers() + 1; i++) {
+                        int prevLogIndex = nextIndex[i]-1;
+                        int prevLogTerm = mLog.getEntry(nextIndex[i]-1).term;
+
+                        if ( (nextIndex[i] > -1) && (nextIndex[i] <= mLog.getLastIndex() ) ) {
+                            //repair log
+                            Entry[] entry = new Entry[mLog.getLastIndex() - nextIndex[i] + 1];
+                            for (int index = 0; index < entry.length; index++) {
+                                entry[index] = mLog.getEntry(nextIndex[i] + index);
+                            }
+                            remoteAppendEntries(i, mConfig.getCurrentTerm(), mID, prevLogIndex, prevLogTerm, entry, mCommitIndex);
+         
+                            }
+                        else { //empty heartbeat
+                            remoteAppendEntries(i, mConfig.getCurrentTerm(), mID, prevLogIndex, prevLogTerm, new Entry[0], mCommitIndex);
+                        } 
+                    }
+
+                }else {
+                    mConfig.setCurrentTerm(followerTerm, 0);
+                    timer.cancel();
+                    RaftServerImpl.setMode(new FollowerMode());
+                }
+                
+            }
+        }
+    }
+    
 }
