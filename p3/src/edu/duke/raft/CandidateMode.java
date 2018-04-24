@@ -5,10 +5,12 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class CandidateMode extends RaftMode {
 
+    //https://piazza.com/class/jc53vkag86t4ep?cid=904 two timer design
     private Timer voteTimer;
     private Timer electionTimer;
+
     private boolean firstTimeCandidate = true;
-    
+
     private void startTimer () {
         if (voteTimer != null)
             voteTimer.cancel();
@@ -25,7 +27,7 @@ public class CandidateMode extends RaftMode {
         int timeout = (overrideTime <= 0) ? randomTime : overrideTime;
         electionTimer = super.scheduleTimer(timeout, 1);
     }
-    
+
     public void go () {
         synchronized (mLock) {
             // When a server first becomes a candidate, it increments its term.
@@ -39,11 +41,11 @@ public class CandidateMode extends RaftMode {
                     term +
                     ": switched to candidate mode.");
             }
-             /*System.out.println("This is our candidate's log " + "S" + 
-            mID + 
-            "." + 
-            term + 
-            ": Log " + 
+             /*System.out.println("This is our candidate's log " + "S" +
+            mID +
+            "." +
+            term +
+            ": Log " +
             mLog);*/
 
             // We set that incremented term, and also "vote" for ourselves in the process.
@@ -52,15 +54,15 @@ public class CandidateMode extends RaftMode {
             startElection();
         }
     }
-    
+
     private void startElection() {
         int term = mConfig.getCurrentTerm();
 
         RaftResponses.setTerm(term);
         RaftResponses.clearVotes(term);
-            
+
         int serverID = 0;
-        while (serverID != mConfig.getNumServers()) {                
+        while (serverID != mConfig.getNumServers()) {
             remoteRequestVote(serverID+1, term, mID, mLog.getLastIndex(), mLog.getLastTerm());
             serverID++;
         }
@@ -71,9 +73,9 @@ public class CandidateMode extends RaftMode {
     // @param index of candidate’s last log entry
     // @param term of candidate’s last log entry
     // @return 0, if server votes for candidate; otherwise, server's current term
-    public int requestVote (int candidateTerm, 
-                            int candidateID, 
-                            int candidateLastLogIndex, 
+    public int requestVote (int candidateTerm,
+                            int candidateID,
+                            int candidateLastLogIndex,
                             int candidateLastLogTerm) {
         synchronized (mLock) {
             int term = mConfig.getCurrentTerm();
@@ -119,8 +121,8 @@ public class CandidateMode extends RaftMode {
             return 0;
         }
     }
-    
-    
+
+
     // @param leader’s term
     // @param current leader
     // @param index of log entry before entries to append
@@ -128,11 +130,11 @@ public class CandidateMode extends RaftMode {
     // @param entries to append (in order of 0 to append.length-1)
     // @param index of highest committed entry
     // @return 0, if server appended entries; otherwise, server's current term
-    public int appendEntries (int leaderTerm, 
-                              int leaderID, 
-                              int leaderPrevLogIndex, 
-                              int leaderPrevLogTerm, 
-                              Entry[] entries, 
+    public int appendEntries (int leaderTerm,
+                              int leaderID,
+                              int leaderPrevLogIndex,
+                              int leaderPrevLogTerm,
+                              Entry[] entries,
                               int leaderCommit) {
         synchronized (mLock) {
             int term = mConfig.getCurrentTerm();
@@ -140,8 +142,8 @@ public class CandidateMode extends RaftMode {
             // Will not accept entries to append from a leader with a lower term.
             if (leaderTerm < term)
                 return term;
-            
-    
+
+
             mConfig.setCurrentTerm(leaderTerm, leaderID);
             voteTimer.cancel();
             electionTimer.cancel();
@@ -149,10 +151,10 @@ public class CandidateMode extends RaftMode {
             return leaderTerm;
         }
     }
-    
+
     // @param id of the timer that timed out
     public void handleTimeout (int timerID) {
-        synchronized (mLock) {            
+        synchronized (mLock) {
             if (timerID == 0) {
                 handleVotingTimeout();
             }
