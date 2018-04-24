@@ -171,6 +171,7 @@ public class LeaderMode extends RaftMode {
                     }
                 }
 
+
                 //if there exists a follower with higher term than current term, leader revert to follower
                 if (term >= followerTerm) {
                     //if leader stays as leader, initiate new cycle
@@ -197,11 +198,14 @@ public class LeaderMode extends RaftMode {
                         }
                     }
 
-                }else { //finds a follower with a higher term, leader revert to follower
-                    mConfig.setCurrentTerm(followerTerm, 0);
-                    timer.cancel();
-                    RaftServerImpl.setMode(new FollowerMode());
+                    return;
                 }
+
+                //finds a follower with a higher term, leader revert to follower
+                mConfig.setCurrentTerm(followerTerm, 0);
+                timer.cancel();
+                RaftServerImpl.setMode(new FollowerMode());
+                
 
             }
         }
